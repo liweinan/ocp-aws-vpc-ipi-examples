@@ -645,4 +645,122 @@ cd /home/ec2-user/openshift
    oc get clusteroperators
    ```
 
-For more information about bastion host setup, refer to the OpenShift installation documentation. 
+For more information about bastion host setup, refer to the OpenShift installation documentation.
+
+## 🗑️ 安全删除VPC
+
+当您需要删除VPC和所有相关资源时，我们提供了一个安全的删除脚本。
+
+### 快速删除
+
+```bash
+# 给删除脚本执行权限
+chmod +x delete-vpc.sh
+
+# 预览删除（推荐先运行）
+./delete-vpc.sh --cluster-name my-cluster --dry-run
+
+# 执行删除
+./delete-vpc.sh --cluster-name my-cluster
+
+# 强制删除（跳过确认）
+./delete-vpc.sh --cluster-name my-cluster --force
+```
+
+### 删除脚本功能
+
+删除脚本会按正确顺序删除以下资源：
+
+1. **OpenShift集群** - 使用官方删除命令
+2. **Bastion主机** - 终止EC2实例
+3. **SSH密钥对** - 删除相关密钥
+4. **VPC堆栈** - 删除CloudFormation堆栈
+5. **输出目录** - 清理本地文件
+
+### 高级选项
+
+```bash
+# 跳过某些组件的删除
+./delete-vpc.sh \
+  --cluster-name my-cluster \
+  --skip-openshift \
+  --skip-bastion
+
+# 指定不同的输出目录
+./delete-vpc.sh \
+  --cluster-name my-cluster \
+  --vpc-output-dir ./custom-vpc-output \
+  --bastion-output-dir ./custom-bastion-output \
+  --openshift-install-dir ./custom-openshift-install
+
+# 使用不同的AWS区域
+./delete-vpc.sh \
+  --cluster-name my-cluster \
+  --region us-west-2
+```
+
+### 手动删除
+
+如果自动化脚本无法使用，可以手动删除：
+
+```bash
+# 1. 删除OpenShift集群
+cd openshift-install
+./openshift-install destroy cluster
+
+# 2. 删除Bastion主机
+INSTANCE_ID=$(cat ../bastion-output/bastion-instance-id)
+aws ec2 terminate-instances --instance-ids $INSTANCE_ID
+
+# 3. 删除SSH密钥对
+aws ec2 delete-key-pair --key-name my-cluster-key
+aws ec2 delete-key-pair --key-name my-cluster-bastion-key
+
+# 4. 删除VPC堆栈
+STACK_NAME=$(cat ../vpc-output/stack-name)
+aws cloudformation delete-stack --stack-name $STACK_NAME
+
+# 5. 清理本地文件
+rm -rf vpc-output bastion-output openshift-install *.pem
+```
+
+### 验证删除
+
+删除完成后，验证所有资源都已正确删除：
+
+```bash
+# 检查CloudFormation堆栈
+aws cloudformation describe-stacks --stack-name my-cluster-vpc-1234567890
+
+# 检查VPC
+VPC_ID=$(cat vpc-output/vpc-id)
+aws ec2 describe-vpcs --vpc-ids $VPC_ID
+
+# 检查EC2实例
+aws ec2 describe-instances \
+  --filters "Name=tag:kubernetes.io/cluster/my-cluster,Values=owned"
+
+# 检查SSH密钥对
+aws ec2 describe-key-pairs --key-names my-cluster-key
+```
+
+### 重要警告
+
+⚠️ **删除VPC是一个不可逆的操作！** 删除后，所有相关的AWS资源将被永久删除，包括：
+- OpenShift集群和所有节点
+- 所有EC2实例
+- 网络配置（子网、路由表、NAT网关等）
+- 存储卷
+- 负载均衡器
+- 安全组
+
+### 删除前检查清单
+
+在删除VPC之前，请确认：
+- [ ] 已备份重要的数据和配置
+- [ ] 已通知所有相关用户
+- [ ] 确认没有生产工作负载在运行
+- [ ] 已记录当前的网络配置（如需要）
+- [ ] 已检查AWS账单，了解当前成本
+
+详细说明请参考 [安全删除VPC指南](README-delete-vpc.md)。 
