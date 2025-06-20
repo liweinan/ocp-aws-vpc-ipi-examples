@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: aws-provision-bastionhost
+parameters:
+- name: vpc_name
+  required: true
+  value: openshift-vpc
+- name: region
+  required: true
+  value: us-east-1
+- name: instance_type
+  required: true
+  value: t3.micro
+- name: key_name
+  required: true
+  value: openshift-key
+
+objects:
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: aws-bastionhost-config
+  data:
+    bastionhost.yaml: |
+      bastionhost:
+        name: ${vpc_name}-bastion
+        vpc_name: ${vpc_name}
+        region: ${region}
+        instance_type: ${instance_type}
+        key_name: ${key_name}
+        subnet: public
+        security_group_rules:
+          - protocol: tcp
+            from_port: 22
+            to_port: 22
+            cidr_blocks: ["0.0.0.0/0"]
+        user_data: |
+          #!/bin/bash
+          yum update -y
+          yum install -y aws-cli
+          yum install -y openshift-client
+        tags:
+          Name: ${vpc_name}-bastion
+          openshift.io/cluster: ${vpc_name} 

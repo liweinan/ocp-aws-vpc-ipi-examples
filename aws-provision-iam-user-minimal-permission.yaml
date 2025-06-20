@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: aws-provision-iam-user-minimal-permission
+parameters:
+- name: cluster_name
+  required: true
+  value: openshift-cluster
+- name: region
+  required: true
+  value: us-east-1
+
+objects:
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: aws-iam-config
+  data:
+    iam-policy.json: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "ec2:*",
+              "elasticloadbalancing:*",
+              "iam:GetRole",
+              "iam:GetRolePolicy",
+              "iam:ListInstanceProfiles",
+              "iam:ListRolePolicies",
+              "iam:ListRoles",
+              "route53:*",
+              "s3:*",
+              "tag:GetResources"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestedRegion": "${region}"
+              },
+              "StringLike": {
+                "aws:ResourceTag/kubernetes.io/cluster/${cluster_name}": "*"
+              }
+            }
+          }
+        ]
+      }
+    user-policy.yaml: |
+      iam_user:
+        name: ${cluster_name}-installer
+        policies:
+          - name: ${cluster_name}-installer-policy
+            policy_document: iam-policy.json 

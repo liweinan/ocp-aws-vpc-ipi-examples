@@ -1,0 +1,679 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Enhanced VPC for OpenShift IPI Installation
+
+Parameters:
+  VpcCidr:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-4]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-24.
+    Default: 10.0.0.0/16
+    Description: CIDR block for VPC.
+    Type: String
+  AvailabilityZoneCount:
+    ConstraintDescription: "The number of availability zones. (Min: 1, Max: 3)"
+    MinValue: 1
+    MaxValue: 3
+    Default: 3
+    Description: "How many AZs to create VPC subnets for. (Min: 1, Max: 3)"
+    Type: Number
+  SubnetBits:
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/19-27.
+    MinValue: 5
+    MaxValue: 13
+    Default: 12
+    Description: "Size of each subnet to create within the availability zones. (Min: 5 = /27, Max: 13 = /19)"
+    Type: Number
+  DhcpOptionSet:
+    Default: "no"
+    AllowedValues:
+    - "yes"
+    - "no"
+    Description: "Create a dhcpOptionSet with a custom DNS name"
+    Type: String
+  OnlyPublicSubnets:
+    Default: "no"
+    AllowedValues:
+    - "yes"
+    - "no"
+    Description: "Only create public subnets"
+    Type: String
+  AllowedAvailabilityZoneList:
+    ConstraintDescription: "Select AZs from this list, e.g. 'us-east-2c,us-east-2a'"
+    Type: CommaDelimitedList
+    Default: ""
+  ResourceSharePrincipals:
+    ConstraintDescription: ResourceSharePrincipals
+    Default: ""
+    Description: "ResourceSharePrincipals"
+    Type: String
+  AdditionalSubnetsCount:
+    Description: "If yes, an additional pub/priv subnets will be created in the same AZ."
+    MinValue: 0
+    MaxValue: 1
+    Default: 0
+    Type: Number
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "Network Configuration"
+      Parameters:
+      - VpcCidr
+      - SubnetBits
+    - Label:
+        default: "Availability Zones"
+      Parameters:
+      - AvailabilityZoneCount
+    ParameterLabels:
+      AvailabilityZoneCount:
+        default: "Availability Zone Count"
+      VpcCidr:
+        default: "VPC CIDR"
+      SubnetBits:
+        default: "Bits Per Subnet"
+
+Conditions:
+  DoAz3: !Equals [3, !Ref AvailabilityZoneCount]
+  DoAz2: !Or [!Equals [2, !Ref AvailabilityZoneCount], Condition: DoAz3]
+  DoDhcp: !Equals ["yes", !Ref DhcpOptionSet]
+  DoOnlyPublicSubnets: !Equals ["yes", !Ref OnlyPublicSubnets]
+  DoAz1PrivateSubnet: !Not [Condition: DoOnlyPublicSubnets]
+  DoAz2PrivateSubnet: !And [ !Not [Condition: DoOnlyPublicSubnets], Condition: DoAz2 ]
+  DoAz3PrivateSubnet: !And [ !Not [Condition: DoOnlyPublicSubnets], Condition: DoAz3 ]
+  AzRestriction: !Not [ !Equals [!Join ['', !Ref AllowedAvailabilityZoneList], ''] ]
+  ShareSubnets: !Not [ !Equals ['', !Ref ResourceSharePrincipals] ]
+  DoAdditionalAz: !Equals [1, !Ref AdditionalSubnetsCount]
+  DoAz1aPrivateSubnet: !And [ Condition: DoAz1PrivateSubnet, Condition: DoAdditionalAz ]
+
+Resources:
+  VPC:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      EnableDnsSupport: "true"
+      EnableDnsHostnames: "true"
+      CidrBlock: !Ref VpcCidr
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "vpc" ] ]
+      - Key: ClusterName
+        Value: !Ref "AWS::StackName"
+      - Key: CreatedBy
+        Value: "Enhanced-VPC-Script"
+
+  PublicSubnet:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      MapPublicIpOnLaunch:
+        !If [
+              "DoOnlyPublicSubnets",
+              "true",
+              "false"
+            ]
+      VpcId: !Ref VPC
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 8, !Ref SubnetBits]]
+      AvailabilityZone:
+        !If [
+              "AzRestriction",
+              !Select [0, !Ref AllowedAvailabilityZoneList ],
+              !Select [0, Fn::GetAZs: !Ref "AWS::Region"]
+            ]
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "public-subnet" ] ]
+      - Key: Type
+        Value: "Public"
+
+  PublicSubnet1a:
+    Type: "AWS::EC2::Subnet"
+    Condition: DoAdditionalAz
+    Properties:
+      MapPublicIpOnLaunch:
+        !If [
+              "DoOnlyPublicSubnets",
+              "true",
+              "false"
+            ]
+      VpcId: !Ref VPC
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 8, !Ref SubnetBits]]
+      AvailabilityZone:
+        !If [
+              "AzRestriction",
+              !Select [0, !Ref AllowedAvailabilityZoneList ],
+              !Select [0, Fn::GetAZs: !Ref "AWS::Region"]
+            ]
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "public-subnet-1a" ] ]
+      - Key: Type
+        Value: "Public"
+
+  PublicSubnet2:
+    Type: "AWS::EC2::Subnet"
+    Condition: DoAz2
+    Properties:
+      MapPublicIpOnLaunch:
+        !If [
+              "DoOnlyPublicSubnets",
+              "true",
+              "false"
+            ]
+      VpcId: !Ref VPC
+      CidrBlock: !Select [2, !Cidr [!Ref VpcCidr, 8, !Ref SubnetBits]]
+      AvailabilityZone:
+        !If [
+              "AzRestriction",
+              !Select [1, !Ref AllowedAvailabilityZoneList ],
+              !Select [1, Fn::GetAZs: !Ref "AWS::Region"]
+            ]
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "public-subnet-2" ] ]
+      - Key: Type
+        Value: "Public"
+
+  PublicSubnet3:
+    Type: "AWS::EC2::Subnet"
+    Condition: DoAz3
+    Properties:
+      MapPublicIpOnLaunch:
+        !If [
+              "DoOnlyPublicSubnets",
+              "true",
+              "false"
+            ]
+      VpcId: !Ref VPC
+      CidrBlock: !Select [3, !Cidr [!Ref VpcCidr, 8, !Ref SubnetBits]]
+      AvailabilityZone:
+        !If [
+              "AzRestriction",
+              !Select [2, !Ref AllowedAvailabilityZoneList ],
+              !Select [2, Fn::GetAZs: !Ref "AWS::Region"]
+            ]
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "public-subnet-3" ] ]
+      - Key: Type
+        Value: "Public"
+
+  InternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "igw" ] ]
+
+  GatewayToInternet:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "public-rt" ] ]
+
+  PublicRoute:
+    Type: "AWS::EC2::Route"
+    DependsOn: GatewayToInternet
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetRouteTableAssociation1a:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Condition: DoAdditionalAz
+    Properties:
+      SubnetId: !Ref PublicSubnet1a
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetRouteTableAssociation2:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Condition: DoAz2
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetRouteTableAssociation3:
+    Condition: DoAz3
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PublicSubnet3
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateSubnet:
+    Type: "AWS::EC2::Subnet"
+    Condition: DoAz1PrivateSubnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [4, !Cidr [!Ref VpcCidr, 8, !Ref SubnetBits]]
+      AvailabilityZone:
+        !If [
+              "AzRestriction",
+              !Select [0, !Ref AllowedAvailabilityZoneList ],
+              !Select [0, Fn::GetAZs: !Ref "AWS::Region"]
+            ]
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "private-subnet" ] ]
+      - Key: Type
+        Value: "Private"
+
+  PrivateRouteTable:
+    Condition: DoAz1PrivateSubnet
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "private-rt" ] ]
+
+  PrivateSubnetRouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Condition: DoAz1PrivateSubnet
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+  NAT:
+    DependsOn:
+    - GatewayToInternet
+    Type: "AWS::EC2::NatGateway"
+    Condition: DoAz1PrivateSubnet
+    Properties:
+      AllocationId:
+        "Fn::GetAtt":
+        - EIP
+        - AllocationId
+      SubnetId: !Ref PublicSubnet
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "nat" ] ]
+
+  EIP:
+    Type: "AWS::EC2::EIP"
+    Condition: DoAz1PrivateSubnet
+    Properties:
+      Domain: vpc
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "eip" ] ]
+
+  Route:
+    Type: "AWS::EC2::Route"
+    Condition: DoAz1PrivateSubnet
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NAT
+
+  PrivateSubnet1a:
+    Type: "AWS::EC2::Subnet"
+    Condition: DoAz1aPrivateSubnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [5, !Cidr [!Ref VpcCidr, 8, !Ref SubnetBits]]
+      AvailabilityZone:
+        !If [
+              "AzRestriction",
+              !Select [0, !Ref AllowedAvailabilityZoneList ],
+              !Select [0, Fn::GetAZs: !Ref "AWS::Region"]
+            ]
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "private-subnet-1a" ] ]
+      - Key: Type
+        Value: "Private"
+
+  PrivateRouteTable1a:
+    Condition: DoAz1aPrivateSubnet
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "private-rt-1a" ] ]
+
+  PrivateSubnetRouteTableAssociation1a:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Condition: DoAz1aPrivateSubnet
+    Properties:
+      SubnetId: !Ref PrivateSubnet1a
+      RouteTableId: !Ref PrivateRouteTable1a
+
+  NAT1a:
+    DependsOn:
+    - GatewayToInternet
+    Type: "AWS::EC2::NatGateway"
+    Condition: DoAz1aPrivateSubnet
+    Properties:
+      AllocationId:
+        "Fn::GetAtt":
+        - EIP1a
+        - AllocationId
+      SubnetId: !Ref PublicSubnet1a
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "nat-1a" ] ]
+
+  EIP1a:
+    Type: "AWS::EC2::EIP"
+    Condition: DoAz1aPrivateSubnet
+    Properties:
+      Domain: vpc
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "eip-1a" ] ]
+
+  Route1a:
+    Type: "AWS::EC2::Route"
+    Condition: DoAz1aPrivateSubnet
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable1a
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NAT1a
+
+  PrivateSubnet2:
+    Type: "AWS::EC2::Subnet"
+    Condition: DoAz2PrivateSubnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [6, !Cidr [!Ref VpcCidr, 8, !Ref SubnetBits]]
+      AvailabilityZone:
+        !If [
+              "AzRestriction",
+              !Select [1, !Ref AllowedAvailabilityZoneList ],
+              !Select [1, Fn::GetAZs: !Ref "AWS::Region"]
+            ]
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "private-subnet-2" ] ]
+      - Key: Type
+        Value: "Private"
+
+  PrivateRouteTable2:
+    Type: "AWS::EC2::RouteTable"
+    Condition: DoAz2PrivateSubnet
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "private-rt-2" ] ]
+
+  PrivateSubnetRouteTableAssociation2:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Condition: DoAz2PrivateSubnet
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable2
+
+  NAT2:
+    DependsOn:
+    - GatewayToInternet
+    Type: "AWS::EC2::NatGateway"
+    Condition: DoAz2PrivateSubnet
+    Properties:
+      AllocationId:
+        "Fn::GetAtt":
+        - EIP2
+        - AllocationId
+      SubnetId: !Ref PublicSubnet2
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "nat-2" ] ]
+
+  EIP2:
+    Type: "AWS::EC2::EIP"
+    Condition: DoAz2PrivateSubnet
+    Properties:
+      Domain: vpc
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "eip-2" ] ]
+
+  Route2:
+    Type: "AWS::EC2::Route"
+    Condition: DoAz2PrivateSubnet
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NAT2
+
+  PrivateSubnet3:
+    Type: "AWS::EC2::Subnet"
+    Condition: DoAz3PrivateSubnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [7, !Cidr [!Ref VpcCidr, 8, !Ref SubnetBits]]
+      AvailabilityZone:
+        !If [
+              "AzRestriction",
+              !Select [2, !Ref AllowedAvailabilityZoneList ],
+              !Select [2, Fn::GetAZs: !Ref "AWS::Region"]
+            ]
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "private-subnet-3" ] ]
+      - Key: Type
+        Value: "Private"
+
+  PrivateRouteTable3:
+    Type: "AWS::EC2::RouteTable"
+    Condition: DoAz3PrivateSubnet
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "private-rt-3" ] ]
+
+  PrivateSubnetRouteTableAssociation3:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Condition: DoAz3PrivateSubnet
+    Properties:
+      SubnetId: !Ref PrivateSubnet3
+      RouteTableId: !Ref PrivateRouteTable3
+
+  NAT3:
+    DependsOn:
+    - GatewayToInternet
+    Type: "AWS::EC2::NatGateway"
+    Condition: DoAz3PrivateSubnet
+    Properties:
+      AllocationId:
+        "Fn::GetAtt":
+        - EIP3
+        - AllocationId
+      SubnetId: !Ref PublicSubnet3
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "nat-3" ] ]
+
+  EIP3:
+    Type: "AWS::EC2::EIP"
+    Condition: DoAz3PrivateSubnet
+    Properties:
+      Domain: vpc
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "eip-3" ] ]
+
+  Route3:
+    Type: "AWS::EC2::Route"
+    Condition: DoAz3PrivateSubnet
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable3
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NAT3
+
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal: '*'
+          Action:
+          - '*'
+          Resource:
+          - '*'
+      RouteTableIds:
+      - !Ref PublicRouteTable
+      - !If [DoAz1PrivateSubnet, !Ref PrivateRouteTable, !Ref "AWS::NoValue"]
+      - !If [DoAz2PrivateSubnet, !Ref PrivateRouteTable2, !Ref "AWS::NoValue"]
+      - !If [DoAz3PrivateSubnet, !Ref PrivateRouteTable3, !Ref "AWS::NoValue"]
+      - !If [DoAz1aPrivateSubnet, !Ref PrivateRouteTable1a, !Ref "AWS::NoValue"]
+      ServiceName: !Join
+      - ''
+      - - com.amazonaws.
+        - !Ref 'AWS::Region'
+        - .s3
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref "AWS::StackName", "s3-endpoint" ] ]
+
+  DhcpOptions:
+    Type: AWS::EC2::DHCPOptions
+    Condition: DoDhcp
+    Properties:
+        DomainName: example.com
+        DomainNameServers:
+          - AmazonProvidedDNS
+        Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Ref "AWS::StackName", "dhcp-options" ] ]
+
+  VPCDHCPOptionsAssociation:
+    Type: AWS::EC2::VPCDHCPOptionsAssociation
+    Condition: DoDhcp
+    Properties:
+      VpcId: !Ref VPC
+      DhcpOptionsId: !Ref DhcpOptions
+
+  ResourceShareSubnets:
+    Type: "AWS::RAM::ResourceShare"
+    Condition: ShareSubnets
+    Properties:
+      Name: !Join [ "-", [ !Ref "AWS::StackName", "resource-share" ] ]
+      ResourceArns:
+        - !Join
+            - ''
+            - [ 'arn:', !Ref "AWS::Partition", ':ec2:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':subnet/', !Ref PrivateSubnet ]
+        - !Join
+            - ''
+            - [ 'arn:', !Ref "AWS::Partition", ':ec2:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':subnet/', !Ref PublicSubnet ]
+        - !If
+            - DoAz2
+            - !Join
+              - ''
+              - [ 'arn:', !Ref "AWS::Partition", ':ec2:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':subnet/', !Ref PrivateSubnet2 ]
+            - !Ref "AWS::NoValue"
+        - !If
+            - DoAz2
+            - !Join
+              - ''
+              - [ 'arn:', !Ref "AWS::Partition", ':ec2:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':subnet/', !Ref PublicSubnet2 ]
+            - !Ref "AWS::NoValue"
+        - !If
+            - DoAz3
+            - !Join
+              - ''
+              - [ 'arn:', !Ref "AWS::Partition", ':ec2:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':subnet/', !Ref PrivateSubnet3 ]
+            - !Ref "AWS::NoValue"
+        - !If
+            - DoAz3
+            - !Join
+              - ''
+              - [ 'arn:', !Ref "AWS::Partition", ':ec2:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':subnet/', !Ref PublicSubnet3 ]
+            - !Ref "AWS::NoValue"
+      Principals:
+        - !Ref ResourceSharePrincipals
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Ref "AWS::StackName", "resource-share" ] ]
+
+Outputs:
+  VpcId:
+    Description: ID of the new VPC.
+    Value: !Ref VPC
+  PublicSubnetIds:
+    Description: Subnet IDs of the public subnets.
+    Value:
+      !Join [
+        ",",
+        [!Ref PublicSubnet, !If [DoAz2, !Ref PublicSubnet2, !Ref "AWS::NoValue"], !If [DoAz3, !Ref PublicSubnet3, !Ref "AWS::NoValue"]]
+      ]
+  PrivateSubnetIds:
+    Description: Subnet IDs of the private subnets.
+    Value:
+      !Join [
+        ",",
+        [!If [DoAz1PrivateSubnet, !Ref PrivateSubnet, !Ref "AWS::NoValue"], !If [DoAz2PrivateSubnet, !Ref PrivateSubnet2, !Ref "AWS::NoValue"], !If [DoAz3PrivateSubnet, !Ref PrivateSubnet3, !Ref "AWS::NoValue"]]
+      ]
+  PublicRouteTableId:
+    Description: Public Route table ID
+    Value: !Ref PublicRouteTable
+  PrivateRouteTableIds:
+    Description: Private Route table IDs
+    Value:
+      !Join [
+        ",",
+        [
+          !If [DoAz1PrivateSubnet,
+                !If [
+                  "AzRestriction",
+                  !Join ["=", [!Select [0, !Ref AllowedAvailabilityZoneList], !Ref PrivateRouteTable]],
+                  !Join ["=", [!Select [0, "Fn::GetAZs": !Ref "AWS::Region"], !Ref PrivateRouteTable]]
+                ],
+               !Ref "AWS::NoValue"
+          ],
+          !If [DoAz2PrivateSubnet,
+                !If [
+                  "AzRestriction",
+                  !Join ["=", [!Select [1, !Ref AllowedAvailabilityZoneList], !Ref PrivateRouteTable2]],
+                  !Join ["=", [!Select [1, "Fn::GetAZs": !Ref "AWS::Region"], !Ref PrivateRouteTable2]]
+                ],
+               !Ref "AWS::NoValue"
+          ],
+          !If [DoAz3PrivateSubnet,
+               !If [
+                  "AzRestriction",
+                  !Join ["=", [!Select [2, !Ref AllowedAvailabilityZoneList], !Ref PrivateRouteTable3]],
+                  !Join ["=", [!Select [2, "Fn::GetAZs": !Ref "AWS::Region"], !Ref PrivateRouteTable3]]
+                ],
+               !Ref "AWS::NoValue"
+          ]
+        ]
+      ]
+  AvailabilityZones:
+    Value:
+      !Join [
+              ",",
+              [
+                !Select [0, !If [ "AzRestriction", !Ref AllowedAvailabilityZoneList, "Fn::GetAZs": !Ref "AWS::Region"]],
+                !If [DoAz2, !Select [1, !If [ "AzRestriction", !Ref AllowedAvailabilityZoneList, "Fn::GetAZs": !Ref "AWS::Region"]], !Ref "AWS::NoValue"],
+                !If [DoAz3, !Select [2, !If [ "AzRestriction", !Ref AllowedAvailabilityZoneList, "Fn::GetAZs": !Ref "AWS::Region"]], !Ref "AWS::NoValue"]
+              ]
+            ]
+  StackName:
+    Description: Name of the CloudFormation stack
+    Value: !Ref "AWS::StackName" 

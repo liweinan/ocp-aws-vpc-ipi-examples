@@ -1,0 +1,85 @@
+.specstory
+vpc-output
+bastion-output
+
+# Generated OpenShift installation files
+openshift-install/
+
+# Generated output directories
+vpc-output/
+bastion-output/
+
+# SSH keys and sensitive files
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Credentials and secrets
+pull-secret.txt
+pull-secret.json
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+
+# Log files
+*.log
+logs/
+*.log.*
+
+# Terraform files
+*.tfstate
+*.tfstate.*
+.terraform/
+terraform.tfvars
+*.auto.tfvars
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and editor files
+.vscode/
+.idea/
+*.sublime-*
+.atom/
+
+# AWS credentials and config
+.aws/
+aws-credentials.txt
+aws-config.txt
+
+# OpenShift specific
+install-config.yaml
+install-config.yaml.backup
+*.yaml.backup
+auth/
+tls/
+metadata.json
+.openshift_install_state.json
+.openshift_install.log
+
+# Cluster API files
+.clusterapi_output/
+
+# Backup files
+*.bak
+*.backup
+*.orig
+
+# Cache directories
+.cache/
+*.cache

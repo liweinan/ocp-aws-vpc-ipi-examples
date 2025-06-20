@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: ipi-conf-aws
+parameters:
+- name: cluster_name
+  required: true
+  value: openshift-cluster
+- name: base_domain
+  required: true
+  value: example.com
+- name: region
+  required: true
+  value: us-east-1
+- name: vpc_id
+  required: true
+- name: private_subnet_id
+  required: true
+- name: public_subnet_id
+  required: true
+
+objects:
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: ipi-install-config
+  data:
+    install-config.yaml: |
+      apiVersion: v1
+      baseDomain: ${base_domain}
+      compute:
+      - architecture: amd64
+        hyperthreading: Enabled
+        name: worker
+        platform:
+          aws:
+            type: m5.xlarge
+        replicas: 3
+      controlPlane:
+        architecture: amd64
+        hyperthreading: Enabled
+        name: master
+        platform:
+          aws:
+            type: m5.xlarge
+        replicas: 3
+      metadata:
+        name: ${cluster_name}
+      networking:
+        clusterNetwork:
+        - cidr: 10.128.0.0/14
+          hostPrefix: 23
+        machineNetwork:
+        - cidr: 10.0.0.0/16
+        networkType: OpenShiftSDN
+        serviceNetwork:
+        - 172.30.0.0/16
+      platform:
+        aws:
+          region: ${region}
+          subnets:
+          - ${private_subnet_id}
+          - ${public_subnet_id}
+          vpc: ${vpc_id}
+      publish: External
+      pullSecret: '{"auths":{"cloud.openshift.com":{"auth":"..."}}}'
+      sshKey: |
+        ssh-rsa AAAA... 

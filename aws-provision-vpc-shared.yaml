@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: aws-provision-vpc-shared
+parameters:
+- name: vpc_name
+  required: true
+  value: openshift-vpc
+- name: region
+  required: true
+  value: us-east-1
+- name: cidr_block
+  required: true
+  value: 10.0.0.0/16
+- name: public_subnet_cidr
+  required: true
+  value: 10.0.1.0/24
+- name: private_subnet_cidr
+  required: true
+  value: 10.0.2.0/24
+
+objects:
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: aws-vpc-config
+  data:
+    vpc.yaml: |
+      vpc:
+        name: ${vpc_name}
+        region: ${region}
+        cidr_block: ${cidr_block}
+        enable_dns_hostnames: true
+        enable_dns_support: true
+        subnets:
+          public:
+            cidr: ${public_subnet_cidr}
+            map_public_ip: true
+          private:
+            cidr: ${private_subnet_cidr}
+            map_public_ip: false
+        tags:
+          kubernetes.io/cluster/${vpc_name}: shared
+          openshift.io/cluster: ${vpc_name} 
