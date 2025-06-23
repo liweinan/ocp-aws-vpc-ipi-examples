@@ -820,4 +820,84 @@ aws ec2 describe-key-pairs --key-names my-cluster-key
 - [按名称删除指南](README-delete-by-name.md) - 通过VPC名称删除
 - [CloudFormation删除指南](README-delete-cloudformation.md) - 使用CloudFormation堆栈删除
 - [按所有者删除指南](README-delete-by-owner.md) - 批量删除多个VPC
-- [快速删除指南](QUICK-DELETE.md) - 简化的删除命令 
+- [快速删除指南](QUICK-DELETE.md) - 简化的删除命令
+
+## 🧹 清理和备份工具
+
+### 清理脚本 (`cleanup.sh`)
+
+用于清理本地生成的文件和可选的AWS资源：
+
+```bash
+# 给脚本执行权限
+chmod +x cleanup.sh
+
+# 仅清理本地文件（默认）
+./cleanup.sh
+
+# 清理本地文件并删除AWS资源
+./cleanup.sh --clean-aws
+
+# 预览清理操作
+./cleanup.sh --dry-run
+
+# 强制清理（跳过确认）
+./cleanup.sh --force
+```
+
+**清理内容：**
+- 本地输出目录（vpc-output, bastion-output, openshift-install）
+- SSH密钥文件（*.pem）
+- 日志文件
+- 临时文件
+- 可选的AWS资源（使用 `--clean-aws` 参数）
+
+### 备份脚本 (`backup.sh`)
+
+用于创建项目文件的压缩备份：
+
+```bash
+# 给脚本执行权限
+chmod +x backup.sh
+
+# 创建基本备份
+./backup.sh
+
+# 包含配置文件
+./backup.sh --include-configs
+
+# 包含SSH密钥
+./backup.sh --include-ssh-keys
+
+# 排除日志文件
+./backup.sh --exclude-logs
+
+# 预览备份操作
+./backup.sh --dry-run
+
+# 指定备份文件名
+./backup.sh --backup-name my-custom-backup
+```
+
+**备份内容：**
+- 输出目录（vpc-output, bastion-output, openshift-install）
+- 配置文件（使用 `--include-configs`）
+- SSH密钥（使用 `--include-ssh-keys`）
+- 脚本文件
+- 排除日志文件（使用 `--exclude-logs`）
+
+### 备份和清理工作流
+
+```bash
+# 1. 创建备份
+./backup.sh --include-configs --include-ssh-keys
+
+# 2. 删除VPC和资源
+./delete-vpc.sh --cluster-name my-cluster
+
+# 3. 清理本地文件
+./cleanup.sh
+
+# 4. 验证清理结果
+ls -la
+``` 
