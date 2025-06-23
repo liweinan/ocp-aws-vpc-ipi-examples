@@ -27,6 +27,55 @@ usage() {
     exit 1
 }
 
+# Function to check if required tools are available
+check_required_tools() {
+    local missing_tools=()
+    
+    # Check for yq
+    if ! command -v yq &> /dev/null; then
+        missing_tools+=("yq")
+    fi
+    
+    # Check for expect (optional, but good to have)
+    if ! command -v expect &> /dev/null; then
+        echo "⚠️  Warning: expect not found. Manual interaction will be required."
+    fi
+    
+    # Check for wget (for downloading OpenShift installer)
+    if ! command -v wget &> /dev/null; then
+        missing_tools+=("wget")
+    fi
+    
+    # Check for tar (for extracting OpenShift installer)
+    if ! command -v tar &> /dev/null; then
+        missing_tools+=("tar")
+    fi
+    
+    if [[ ${#missing_tools[@]} -gt 0 ]]; then
+        echo "❌ Error: Required tools not found: ${missing_tools[*]}"
+        echo ""
+        echo "Please install the missing tools:"
+        for tool in "${missing_tools[@]}"; do
+            case $tool in
+                "yq")
+                    echo "  yq: brew install yq (macOS) or visit https://github.com/mikefarah/yq"
+                    ;;
+                "wget")
+                    echo "  wget: brew install wget (macOS) or apt-get install wget (Ubuntu)"
+                    ;;
+                "tar")
+                    echo "  tar: Usually pre-installed on most systems"
+                    ;;
+            esac
+        done
+        echo ""
+        echo "For more information, see the README-openshift-deployment.md file."
+        exit 1
+    fi
+    
+    echo "✅ All required tools are available"
+}
+
 # Function to check if OpenShift installer is available
 check_openshift_installer() {
     if command -v openshift-install &> /dev/null; then
@@ -112,6 +161,10 @@ OPENSHIFT_VERSION=${OPENSHIFT_VERSION:-$DEFAULT_OPENSHIFT_VERSION}
 INSTALL_DIR=${INSTALL_DIR:-$DEFAULT_INSTALL_DIR}
 PUBLISH_STRATEGY=${PUBLISH_STRATEGY:-$DEFAULT_PUBLISH_STRATEGY}
 DRY_RUN=${DRY_RUN:-no}
+
+# Check for required tools
+echo "🔧 Checking required tools..."
+check_required_tools
 
 # Validate VPC output
 echo "🔍 Validating VPC output..."

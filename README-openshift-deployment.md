@@ -135,6 +135,29 @@ Deploys OpenShift cluster using the VPC infrastructure with version-compatible c
 - **Dry Run Mode**: Generate config without installing
 - **Automatic Backup**: Always creates backup of install-config.yaml
 
+#### Prerequisites:
+
+The script requires the following tools to be installed:
+
+| Tool | Purpose | Installation |
+|------|---------|--------------|
+| `yq` | YAML file manipulation | `brew install yq` (macOS)<br>`apt-get install yq` (Ubuntu)<br>[Download](https://github.com/mikefarah/yq) |
+| `wget` | Download OpenShift installer | `brew install wget` (macOS)<br>`apt-get install wget` (Ubuntu) |
+| `tar` | Extract OpenShift installer | Usually pre-installed |
+| `aws` | AWS CLI for credentials | `brew install awscli` (macOS)<br>`apt-get install awscli` (Ubuntu) |
+| `openshift-install` | OpenShift installer | Downloaded automatically by script |
+
+**Quick Installation (macOS):**
+```bash
+brew install yq wget awscli
+```
+
+**Quick Installation (Ubuntu/Debian):**
+```bash
+sudo apt-get update
+sudo apt-get install yq wget awscli
+```
+
 #### Benefits of This Approach:
 
 - **Guaranteed Compatibility**: Uses official `openshift-install create install-config` for perfect version compatibility
@@ -350,7 +373,22 @@ aws ec2 describe-instances \
 
 ### Common Issues
 
-1. **VPC Creation Fails**
+1. **Missing Required Tools**
+   ```bash
+   # If you see "Required tools not found" error:
+   
+   # Check what's missing
+   which yq wget tar aws
+   
+   # Install missing tools (macOS)
+   brew install yq wget awscli
+   
+   # Install missing tools (Ubuntu)
+   sudo apt-get update
+   sudo apt-get install yq wget awscli
+   ```
+
+2. **VPC Creation Fails**
    ```bash
    # Check AWS credentials
    aws sts get-caller-identity
@@ -360,7 +398,7 @@ aws ec2 describe-instances \
      --stack-name my-cluster-vpc-1234567890
    ```
 
-2. **OpenShift Installation Fails**
+3. **OpenShift Installation Fails**
    ```bash
    # Check installer logs
    tail -f openshift-install/.openshift_install.log
@@ -372,7 +410,7 @@ aws ec2 describe-instances \
    ./openshift-install version
    ```
 
-3. **Configuration Compatibility Issues**
+4. **Configuration Compatibility Issues**
    ```bash
    # The script uses openshift-install create install-config for guaranteed compatibility
    # If you encounter issues during manual configuration:
@@ -390,13 +428,18 @@ aws ec2 describe-instances \
    ls -la install-config.yaml.backup.*
    ```
 
-4. **Bastion Host Issues**
+5. **YAML Patching Issues**
    ```bash
-   # Check instance status
-   aws ec2 describe-instances --instance-ids i-1234567890abcdef0
+   # If yq fails to patch the install-config.yaml:
    
-   # Check security group
-   aws ec2 describe-security-groups --group-ids sg-1234567890abcdef0
+   # Check yq version
+   yq --version
+   
+   # Verify the YAML file is valid
+   yq eval '.' install-config.yaml
+   
+   # Check if the file exists and is readable
+   ls -la install-config.yaml
    ```
 
 ### Version Compatibility
@@ -414,10 +457,7 @@ The script now uses `openshift-install create install-config` to ensure compatib
 ./create-vpc.sh --output-dir ./debug-vpc
 
 # OpenShift deployment with dry run
-./deploy-openshift.sh \
-  --dry-run \
-  --pull-secret "$(cat pull-secret.json)" \
-  --ssh-key "$(cat ~/.ssh/id_rsa.pub)"
+./deploy-openshift.sh --dry-run
 
 # Check the generated configuration
 cat openshift-install/install-config.yaml
@@ -468,4 +508,4 @@ This workflow is designed to be modular and extensible. Key areas for enhancemen
 
 ## 📄 License
 
-This workflow is provided as-is for educational and operational purposes. Please ensure compliance with your organization's policies and AWS best practices. 
+This workflow is provided as-is for educational and operational purposes. Please ensure compliance with your organization's policies and AWS best practices.
