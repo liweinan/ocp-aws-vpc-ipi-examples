@@ -1,51 +1,64 @@
-# CloudFormation VPC删除脚本
+# CloudFormation VPC Deletion Script
 
-这个脚本专门用于删除CloudFormation VPC堆栈，根据同事建议使用 `aws cloudformation delete-stack` 来确保整个stack内创建的所有资源都被正确删除。
+The `delete-vpc-cloudformation.sh` script is specifically designed to delete CloudFormation VPC stacks, ensuring all resources created within the stack are properly deleted.
 
-## 🚀 快速使用
+## 🚀 Quick Start
 
 ```bash
-# 给脚本执行权限
+# Make script executable
 chmod +x delete-vpc-cloudformation.sh
 
-# 使用集群名称查找并删除
+# Delete using cluster name
 ./delete-vpc-cloudformation.sh --cluster-name my-cluster
 
-# 使用具体的堆栈名称删除
+# Delete using specific stack name
 ./delete-vpc-cloudformation.sh --stack-name my-cluster-vpc-1750419818
 
-# 预览删除（强烈推荐先运行）
+# Preview deletion (strongly recommended)
 ./delete-vpc-cloudformation.sh --cluster-name my-cluster --dry-run
 
-# 强制删除（跳过确认）
+# Force deletion (skip confirmations)
 ./delete-vpc-cloudformation.sh --stack-name my-cluster-vpc-1750419818 --force
 ```
 
-## 📋 参数说明
+## 📋 Features
 
-- `--cluster-name` - 集群名称（用于查找对应的CloudFormation堆栈）
-- `--stack-name` - CloudFormation堆栈名称（如果知道具体名称）
-- `--region` - AWS区域（默认：us-east-1）
-- `--force` - 强制删除，跳过确认
-- `--dry-run` - 预览模式，不实际删除
-- `--help` - 显示帮助信息
+- **Complete Resource Deletion**: Uses `aws cloudformation delete-stack` to ensure all resources are deleted
+- **Dependency Handling**: CloudFormation automatically handles resource dependencies
+- **Atomic Operations**: Either all resources are deleted or the operation rolls back
+- **Audit Trail**: Complete CloudFormation event records for all deletion operations
+- **Smart Discovery**: Can find stacks by cluster name or use specific stack names
+- **Safety Confirmations**: User confirmation for destructive operations
 
-## 🛠️ 脚本特点
+## 🔧 Command Line Options
 
-### 同事建议的优势
-- **完整删除** - 使用 `aws cloudformation delete-stack` 确保所有资源都被删除
-- **依赖处理** - CloudFormation会自动处理资源间的依赖关系
-- **原子操作** - 要么全部删除成功，要么回滚到原状态
-- **审计追踪** - 所有删除操作都有完整的CloudFormation事件记录
+| Option | Description | Default | Required |
+|--------|-------------|---------|----------|
+| `--cluster-name` | Cluster name to find corresponding CloudFormation stack | N/A | No* |
+| `--stack-name` | Specific CloudFormation stack name | N/A | No* |
+| `--region` | AWS region | `us-east-1` | No |
+| `--force` | Skip confirmation prompts | `false` | No |
+| `--dry-run` | Preview operations without executing | `false` | No |
+| `--help` | Display help message | N/A | No |
 
-### 智能查找
-- 如果提供 `--stack-name`，直接使用指定的堆栈名称
-- 如果提供 `--cluster-name`，自动查找包含该集群名称的VPC堆栈
-- 显示找到的堆栈详细信息和资源列表
+*Either `--cluster-name` or `--stack-name` is required
 
-## 📊 示例输出
+## 🛠️ Script Advantages
 
-### 使用集群名称查找
+### CloudFormation Benefits
+- **Complete Deletion**: Ensures all resources created by the stack are deleted
+- **Dependency Management**: Automatically handles resource dependencies
+- **Atomic Operations**: Either succeeds completely or rolls back
+- **Audit Compliance**: Complete event records for compliance and troubleshooting
+
+### Intelligent Discovery
+- If `--stack-name` is provided, uses the specified stack name directly
+- If `--cluster-name` is provided, automatically finds VPC stacks containing the cluster name
+- Displays detailed stack information and resource lists
+
+## 📊 Example Output
+
+### Using Cluster Name
 ```
 🗑️  CloudFormation VPC Deletion Script
 ======================================
@@ -73,15 +86,15 @@ chmod +x delete-vpc-cloudformation.sh
 | PrivateSubnet2 | subnet-0123456789abcdef2 | AWS::EC2::Subnet | CREATE_COMPLETE |
 | PrivateSubnet3 | subnet-0123456789abcdef3 | AWS::EC2::Subnet | CREATE_COMPLETE |
 
-⚠️  重要提醒：这将删除整个CloudFormation stack和所有相关资源！
+⚠️  Important: This will delete the entire CloudFormation stack and all related resources!
    - Stack: my-cluster-vpc-1750419818
-   - 所有VPC资源（VPC、子网、路由表、安全组等）
-   - 所有网络资源（NAT网关、互联网网关等）
-   - 其他相关AWS资源
+   - All VPC resources (VPC, subnets, route tables, security groups)
+   - All network resources (NAT gateways, internet gateways)
+   - Other related AWS resources
 
-💡 同事建议：使用 aws cloudformation delete-stack 确保所有资源都被正确删除
+💡 Recommendation: Using aws cloudformation delete-stack ensures all resources are properly deleted
 
-确定要删除这个CloudFormation stack吗？(y/N): y
+Do you want to delete this CloudFormation stack? (y/N): y
 
 🏗️  Deleting CloudFormation Stack
 -----------------------------------
@@ -96,17 +109,17 @@ chmod +x delete-vpc-cloudformation.sh
 ✅ CloudFormation stack deletion completed!
 ✅ Stack: my-cluster-vpc-1750419818
 
-🎉 根据同事建议，使用 aws cloudformation delete-stack 成功删除了整个stack！
-   这确保了stack内创建的所有资源都被正确删除。
+🎉 Successfully deleted the entire stack using aws cloudformation delete-stack!
+   This ensures all resources created within the stack are properly deleted.
 
 💡 Tips:
-   - 检查AWS Console确认所有资源都已删除
-   - 监控AWS费用确保没有意外收费
-   - 如果删除失败，检查是否有依赖关系需要手动处理
-   - 同事建议：始终使用 aws cloudformation delete-stack 来删除VPC stack
+   - Check AWS Console to confirm all resources are deleted
+   - Monitor AWS costs to ensure no unexpected charges
+   - If deletion fails, check for dependencies that need manual handling
+   - Recommendation: Always use aws cloudformation delete-stack for VPC stacks
 ```
 
-### 预览模式
+### Dry Run Mode
 ```
 🗑️  CloudFormation VPC Deletion Script
 ======================================
@@ -141,93 +154,95 @@ chmod +x delete-vpc-cloudformation.sh
 ===================
 ℹ️  DRY RUN COMPLETED - No resources were actually deleted
 
-要执行实际删除，请运行脚本时不使用 --dry-run
+To perform actual deletion, run the script without --dry-run
 ```
 
-## 🔍 查找CloudFormation堆栈
+## 🔍 Finding CloudFormation Stacks
 
-如果您不确定堆栈的确切名称：
+If you're unsure of the exact stack name:
 
 ```bash
-# 列出所有CloudFormation堆栈
+# List all CloudFormation stacks
 aws cloudformation list-stacks \
   --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
   --query 'StackSummaries[].{StackName:StackName,CreationTime:CreationTime}' \
   --output table
 
-# 查找包含特定关键词的堆栈
+# Find stacks containing specific keywords
 aws cloudformation list-stacks \
   --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
   --query "StackSummaries[?contains(StackName, 'my-cluster')].{StackName:StackName,CreationTime:CreationTime}" \
   --output table
 
-# 查找VPC相关的堆栈
+# Find VPC-related stacks
 aws cloudformation list-stacks \
   --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
   --query "StackSummaries[?contains(StackName, 'vpc')].{StackName:StackName,CreationTime:CreationTime}" \
   --output table
 ```
 
-## ⚠️ 重要提醒
+## ⚠️ Important Warnings
 
-### 删除前检查
-1. **确认堆栈名称** - 确保删除的是正确的CloudFormation堆栈
-2. **检查资源状态** - 确认堆栈状态为 `CREATE_COMPLETE` 或 `UPDATE_COMPLETE`
-3. **备份重要数据** - 如果有重要数据，先备份
-4. **通知相关人员** - 确保没有其他人在使用这个环境
+### Pre-Deletion Checklist
+1. **Confirm Stack Name**: Ensure you're deleting the correct CloudFormation stack
+2. **Check Stack Status**: Verify stack status is `CREATE_COMPLETE` or `UPDATE_COMPLETE`
+3. **Backup Important Data**: Backup any important data if needed
+4. **Notify Team Members**: Ensure no one else is using this environment
 
-### ⚠️ 需要注意：
-**脚本会删除账户内**所有**匹配 `vpc` 模式的 CloudFormation stacks**
-- 如果账户内有其他人创建的 VPC stacks，也会被删除
-- 建议使用 `--filter-pattern` 参数进行更精确的过滤
-- 在共享账户中使用时要特别小心
+### Security Considerations
+- **Complete Deletion**: Ensures all resources created through CloudFormation are deleted
+- **Security**: Avoids leaving orphaned resources that could pose security risks
+- **Cost Control**: Prevents orphaned resources from continuing to incur charges
+- **Audit Compliance**: Complete deletion records for compliance purposes
 
-### 同事建议的优势
-- **完整性** - 确保所有通过CloudFormation创建的资源都被删除
-- **安全性** - 避免遗漏资源导致的安全风险
-- **成本控制** - 避免遗漏资源导致的持续收费
-- **审计合规** - 完整的删除记录便于审计
+## 🆘 Troubleshooting
 
-## 🆘 故障排除
-
-### 堆栈删除失败
+### Stack Deletion Failures
 ```bash
-# 查看堆栈事件，了解删除失败的原因
+# View stack events to understand deletion failure
 aws cloudformation describe-stack-events \
   --stack-name my-cluster-vpc-1750419818 \
   --query 'StackEvents[?ResourceStatus==`DELETE_FAILED`].{LogicalResourceId:LogicalResourceId,ResourceStatusReason:ResourceStatusReason}' \
   --output table
 
-# 查看堆栈状态
+# Check stack status
 aws cloudformation describe-stacks \
   --stack-name my-cluster-vpc-1750419818 \
   --query 'Stacks[0].StackStatus' \
   --output text
 ```
 
-### 依赖资源问题
+### Dependency Issues
 ```bash
-# 查看堆栈资源
+# View stack resources
 aws cloudformation list-stack-resources \
   --stack-name my-cluster-vpc-1750419818 \
   --query 'StackResourceSummaries[?ResourceStatus!=`DELETE_COMPLETE`].{LogicalResourceId:LogicalResourceId,ResourceType:ResourceType,ResourceStatus:ResourceStatus}' \
   --output table
 ```
 
-## 💡 使用建议
+## 💡 Usage Recommendations
 
-1. **总是先预览** - 使用 `--dry-run` 查看将要删除的资源
-2. **使用堆栈名称** - 如果知道确切的堆栈名称，直接使用 `--stack-name`
-3. **监控删除进度** - 删除过程可能需要几分钟，可以在AWS Console中监控
-4. **检查删除结果** - 删除完成后，确认所有资源都已删除
+1. **Always Preview First**: Use `--dry-run` to see what will be deleted
+2. **Use Stack Names**: If you know the exact stack name, use `--stack-name` for direct access
+3. **Monitor Progress**: Deletion may take several minutes, monitor in AWS Console
+4. **Verify Results**: After deletion, confirm all resources are removed
 
-## 🔄 与其他脚本的区别
+## 🔄 Alternative Deletion Scripts
 
-| 脚本 | 适用场景 | 优势 |
-|------|----------|------|
-| `delete-vpc-cloudformation.sh` | 知道CloudFormation堆栈 | 最安全，确保完整删除 |
-| `delete-vpc-by-name.sh` | 只知道VPC名称 | 智能查找，灵活 |
-| `delete-vpc-by-owner.sh` | 批量删除多个VPC | 批量操作，效率高 |
-| `delete-vpc.sh` | 有完整输出目录 | 最完整的删除流程 |
+| Script | Use Case | When to Use |
+|--------|----------|-------------|
+| `delete-vpc-cloudformation.sh` | Know CloudFormation stack | Most secure, ensures complete deletion |
+| `delete-vpc-by-name.sh` | Only know VPC name | Smart discovery, flexible |
+| `delete-vpc-by-owner.sh` | Batch delete multiple VPCs | Bulk operations, high efficiency |
+| `delete-vpc.sh` | Have complete output directory | Most comprehensive deletion process |
 
-根据同事建议，**推荐优先使用 `delete-vpc-cloudformation.sh`**，因为它使用 `aws cloudformation delete-stack` 确保所有资源都被正确删除。 
+**Recommended**: Use `delete-vpc-cloudformation.sh` as the primary deletion method since it uses `aws cloudformation delete-stack` to ensure all resources are properly deleted.
+
+## 📚 Related Documentation
+
+- [Complete Deletion Guide](README-delete-vpc.md) - When you have output directories
+- [Delete by Name Guide](README-delete-by-name.md) - When you only know VPC name
+- [Batch Deletion Guide](README-delete-by-owner.md) - Multiple VPC deletion
+- [Quick Delete Guide](QUICK-DELETE.md) - Simplified deletion commands
+- [AWS CloudFormation Documentation](https://docs.aws.amazon.com/cloudformation/) - Official AWS documentation 

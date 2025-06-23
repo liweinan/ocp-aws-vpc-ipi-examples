@@ -1,60 +1,60 @@
-# 快速删除VPC指南
+# Quick Delete VPC Guide
 
-这是一个简化的删除指南，提供最常用的删除命令。
+A simplified deletion guide providing the most commonly used deletion commands.
 
-## 🚨 重要警告
+## 🚨 Important Warning
 
-**删除VPC会永久删除所有相关资源，包括OpenShift集群、EC2实例、网络配置等！**
+**Deleting VPCs will permanently delete all related resources, including OpenShift clusters, EC2 instances, network configurations, and more!**
 
-## 方法1：使用删除脚本（推荐）
+## Method 1: Using Deletion Scripts (Recommended)
 
 ```bash
-# 1. 给脚本执行权限
+# 1. Make script executable
 chmod +x delete-vpc.sh
 
-# 2. 预览删除（强烈推荐先运行）
+# 2. Preview deletion (strongly recommended first)
 ./delete-vpc.sh --cluster-name my-cluster --dry-run
 
-# 3. 执行删除
+# 3. Execute deletion
 ./delete-vpc.sh --cluster-name my-cluster
 ```
 
-## 方法2：手动删除
+## Method 2: Manual Deletion
 
 ```bash
-# 1. 删除OpenShift集群
+# 1. Delete OpenShift cluster
 cd openshift-install
 ./openshift-install destroy cluster
 
-# 2. 删除Bastion主机
+# 2. Delete bastion host
 INSTANCE_ID=$(cat ../bastion-output/bastion-instance-id)
 aws ec2 terminate-instances --instance-ids $INSTANCE_ID
 
-# 3. 删除VPC堆栈
+# 3. Delete VPC stack
 STACK_NAME=$(cat ../vpc-output/stack-name)
 aws cloudformation delete-stack --stack-name $STACK_NAME
 
-# 4. 清理本地文件
+# 4. Clean up local files
 rm -rf vpc-output bastion-output openshift-install *.pem
 ```
 
-## 验证删除
+## Verification
 
 ```bash
-# 检查是否还有相关资源
+# Check if related resources still exist
 aws ec2 describe-instances --filters "Name=tag:kubernetes.io/cluster/my-cluster,Values=owned"
 aws cloudformation describe-stacks --stack-name my-cluster-vpc-*
 ```
 
-## 常见问题
+## Common Questions
 
-**Q: 删除失败怎么办？**
-A: 检查错误信息，通常需要先删除依赖资源。
+**Q: What if deletion fails?**
+A: Check error messages, usually dependent resources need to be deleted first.
 
-**Q: 可以跳过某些步骤吗？**
-A: 使用 `--skip-openshift` 或 `--skip-bastion` 参数。
+**Q: Can I skip certain steps?**
+A: Use `--skip-openshift` or `--skip-bastion` parameters.
 
-**Q: 如何强制删除？**
-A: 使用 `--force` 参数跳过确认提示。
+**Q: How to force deletion?**
+A: Use `--force` parameter to skip confirmation prompts.
 
-详细说明请参考 [完整删除指南](README-delete-vpc.md)。 
+For detailed instructions, refer to [Complete Deletion Guide](README-delete-vpc.md). 

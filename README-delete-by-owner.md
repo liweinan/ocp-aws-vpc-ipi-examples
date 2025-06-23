@@ -1,52 +1,63 @@
-# 按AWS账户所有者删除VPC
+# Batch VPC Deletion by AWS Account Owner
 
-这个脚本允许您通过AWS账户所有者ID来查找和删除VPC CloudFormation堆栈，特别适用于批量删除或管理多个VPC的场景。
+The `delete-vpc-by-owner.sh` script allows you to find and delete VPC CloudFormation stacks by AWS account owner ID, particularly useful for batch deletion or managing multiple VPCs.
 
-## 🚀 快速使用
+## 🚀 Quick Start
 
 ```bash
-# 给脚本执行权限
+# Make script executable
 chmod +x delete-vpc-by-owner.sh
 
-# 预览删除指定账户中的所有VPC堆栈
+# Preview deletion of all VPC stacks in account
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --dry-run
 
-# 删除指定账户中的所有VPC堆栈
+# Delete all VPC stacks in account
 ./delete-vpc-by-owner.sh --owner-id 123456789012
 
-# 删除特定集群的VPC堆栈
+# Delete specific cluster VPC stacks
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern my-cluster
 
-# 强制删除（跳过确认）
+# Force deletion (skip confirmations)
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --force
 ```
 
-## 📋 参数说明
+## 📋 Features
 
-- `--owner-id` - AWS账户所有者ID（必需）
-- `--region` - AWS区域（默认：us-east-1）
-- `--filter-pattern` - 过滤VPC堆栈的模式（默认：vpc）
-- `--force` - 强制删除，跳过确认
-- `--dry-run` - 预览模式，不实际删除
-- `--help` - 显示帮助信息
+- **Batch Operations**: Process multiple CloudFormation stacks simultaneously
+- **Smart Filtering**: Filter stacks by pattern matching
+- **Validation**: Only delete stacks containing VPC resources
+- **Progress Monitoring**: Display deletion progress and results
+- **Safety Features**: Preview mode and user confirmations
+- **Account Verification**: Validate specified account ID against current account
 
-## 🛠️ 脚本特点
+## 🔧 Command Line Options
 
-### 批量操作能力
-- **多堆栈处理** - 可以同时处理多个CloudFormation堆栈
-- **智能过滤** - 通过模式匹配过滤特定的堆栈
-- **验证机制** - 只删除包含VPC资源的堆栈
-- **进度监控** - 显示删除进度和结果
+| Option | Description | Default | Required |
+|--------|-------------|---------|----------|
+| `--owner-id` | AWS account owner ID | N/A | Yes |
+| `--region` | AWS region | `us-east-1` | No |
+| `--filter-pattern` | Filter VPC stacks by pattern | `vpc` | No |
+| `--force` | Skip confirmation prompts | `false` | No |
+| `--dry-run` | Preview operations without executing | `false` | No |
+| `--help` | Display help message | N/A | No |
 
-### 安全特性
-- **预览模式** - 可以预览将要删除的堆栈
-- **用户确认** - 默认需要用户确认每个删除操作
-- **账户验证** - 验证指定的账户ID与当前账户是否匹配
-- **状态检查** - 只处理状态正常的堆栈
+## 🛠️ Script Capabilities
 
-## 📊 示例输出
+### Batch Processing
+- **Multi-Stack Handling**: Can process multiple CloudFormation stacks at once
+- **Intelligent Filtering**: Filter specific stacks using pattern matching
+- **Validation Mechanism**: Only delete stacks containing VPC resources
+- **Progress Tracking**: Show deletion progress and results
 
-### 预览模式
+### Safety Features
+- **Preview Mode**: Preview stacks to be deleted before execution
+- **User Confirmation**: Require user confirmation for each deletion operation
+- **Account Validation**: Verify specified account ID matches current account
+- **Status Checking**: Only process stacks in normal status
+
+## 📊 Example Output
+
+### Dry Run Mode
 ```
 [INFO] Using AWS Account: 123456789012
 [INFO] Searching for VPC CloudFormation stacks in account 123456789012 (region: us-east-1)...
@@ -64,7 +75,7 @@ Are you sure you want to delete these stacks? (yes/no): no
 [INFO] Deletion cancelled
 ```
 
-### 实际删除
+### Actual Deletion
 ```
 [INFO] Using AWS Account: 123456789012
 [INFO] Searching for VPC CloudFormation stacks in account 123456789012 (region: us-east-1)...
@@ -87,155 +98,157 @@ Are you sure you want to delete these stacks? (yes/no): yes
 [SUCCESS] Deletion process completed. Successfully processed 1 of 1 stack(s)
 ```
 
-## 🔍 查找AWS账户ID
+## 🔍 Finding AWS Account ID
 
-如果您不确定AWS账户ID：
+If you're unsure of your AWS account ID:
 
 ```bash
-# 查看当前AWS账户ID
+# View current AWS account ID
 aws sts get-caller-identity --query 'Account' --output text
 
-# 查看当前账户的详细信息
+# View current account details
 aws sts get-caller-identity
 
-# 查看所有可用的账户（如果有组织权限）
+# View all available accounts (if you have organization permissions)
 aws organizations list-accounts --query 'Accounts[].{Id:Id,Name:Name,Status:Status}' --output table
 ```
 
-## 🎯 使用场景
+## 🎯 Use Cases
 
-### 1. 批量清理测试环境
+### Batch Cleanup of Test Environments
 ```bash
-# 删除所有测试集群的VPC
+# Delete all test cluster VPCs
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern test
 
-# 删除所有开发环境的VPC
+# Delete all development environment VPCs
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern dev
 ```
 
-### 2. 清理特定项目
+### Project-Specific Cleanup
 ```bash
-# 删除特定项目的所有VPC
+# Delete all VPCs for a specific project
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern project-name
 
-# 删除特定时间段的VPC
+# Delete VPCs from a specific time period
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern 17504198
 ```
 
-### 3. 跨区域清理
+### Cross-Region Cleanup
 ```bash
-# 在us-west-2区域删除VPC
+# Delete VPCs in us-west-2 region
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --region us-west-2
 
-# 在多个区域执行删除（需要分别运行）
+# Delete VPCs in multiple regions (run separately)
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --region us-east-1
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --region us-west-2
 ```
 
-## ⚠️ 重要提醒
+## ⚠️ Important Warnings
 
-### 批量删除风险
-1. **影响范围大** - 批量删除会影响多个环境
-2. **不可逆操作** - 删除后无法恢复
-3. **依赖关系** - 确保没有服务依赖这些VPC
-4. **权限要求** - 需要足够的权限删除所有堆栈
+### Batch Deletion Risks
+1. **Large Impact**: Batch deletion affects multiple environments
+2. **Irreversible Operation**: Deleted resources cannot be recovered
+3. **Dependencies**: Ensure no services depend on these VPCs
+4. **Permissions**: Requires sufficient permissions to delete all stacks
 
-### ⚠️ 需要注意：
-**脚本会删除账户内**所有**匹配 `vpc` 模式的 CloudFormation stacks**
-- 如果账户内有其他人创建的 VPC stacks，也会被删除
-- 建议使用 `--filter-pattern` 参数进行更精确的过滤
-- 在共享账户中使用时要特别小心
+### Safety Recommendations
+- **Always Preview First**: Use `--dry-run` to see stacks to be deleted
+- **Batch in Small Groups**: Don't delete too many stacks at once
+- **Backup Important Data**: Ensure important data is backed up before deletion
+- **Notify Team Members**: Ensure no one else is using these environments
 
-### 安全建议
-- **总是先预览** - 使用 `--dry-run` 查看将要删除的堆栈
-- **分批删除** - 不要一次性删除太多堆栈
-- **备份重要数据** - 删除前确保重要数据已备份
-- **通知相关人员** - 确保没有其他人在使用这些环境
+## 🆘 Troubleshooting
 
-## 🆘 故障排除
-
-### 权限问题
+### Permission Issues
 ```bash
-# 检查当前权限
+# Check current permissions
 aws sts get-caller-identity
 
-# 检查CloudFormation权限
+# Check CloudFormation permissions
 aws cloudformation list-stacks --max-items 1
 
-# 检查EC2权限
+# Check EC2 permissions
 aws ec2 describe-vpcs --max-items 1
 ```
 
-### 堆栈删除失败
+### Stack Deletion Failures
 ```bash
-# 查看失败的堆栈
+# View failed stacks
 aws cloudformation list-stacks \
   --stack-status-filter DELETE_FAILED \
   --query 'StackSummaries[].{StackName:StackName,DeletionTime:DeletionTime}' \
   --output table
 
-# 查看堆栈事件
+# View stack events
 aws cloudformation describe-stack-events \
   --stack-name failed-stack-name \
   --query 'StackEvents[?ResourceStatus==`DELETE_FAILED`].{LogicalResourceId:LogicalResourceId,ResourceStatusReason:ResourceStatusReason}' \
   --output table
 ```
 
-### 账户ID不匹配
+### Account ID Mismatch
 ```bash
-# 确认当前账户ID
+# Confirm current account ID
 aws sts get-caller-identity --query 'Account' --output text
 
-# 如果使用不同的AWS配置文件
+# If using different AWS profile
 AWS_PROFILE=other-profile aws sts get-caller-identity --query 'Account' --output text
 ```
 
-## 💡 使用建议
+## 💡 Usage Recommendations
 
-### 1. 渐进式删除
+### Gradual Deletion
 ```bash
-# 第一步：预览要删除的堆栈
+# Step 1: Preview stacks to be deleted
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern test --dry-run
 
-# 第二步：删除少量堆栈
+# Step 2: Delete small batches
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern test-cluster-1
 
-# 第三步：删除剩余堆栈
+# Step 3: Delete remaining stacks
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern test-cluster-2
 ```
 
-### 2. 使用模式过滤
+### Pattern Filtering
 ```bash
-# 按时间过滤（删除特定日期的堆栈）
+# Filter by time (delete stacks from specific date)
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern 17504198
 
-# 按环境过滤
+# Filter by environment
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern dev
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern staging
 ./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern prod
 ```
 
-### 3. 监控和验证
+### Monitoring and Verification
 ```bash
-# 删除后验证
+# Verify deletion after completion
 aws cloudformation list-stacks \
   --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
   --query "StackSummaries[?contains(StackName, 'vpc')].StackName" \
   --output text
 
-# 检查VPC
+# Check VPCs
 aws ec2 describe-vpcs \
   --query 'Vpcs[].{VpcId:VpcId,Name:Tags[?Key==`Name`].Value|[0]}' \
   --output table
 ```
 
-## 🔄 与其他脚本的区别
+## 🔄 Comparison with Other Scripts
 
-| 脚本 | 适用场景 | 优势 |
-|------|----------|------|
-| `delete-vpc-by-owner.sh` | 批量删除多个VPC | 批量操作，效率高 |
-| `delete-vpc-cloudformation.sh` | 单个堆栈删除 | 最安全，确保完整删除 |
-| `delete-vpc-by-name.sh` | 只知道VPC名称 | 智能查找，灵活 |
-| `delete-vpc.sh` | 有完整输出目录 | 最完整的删除流程 |
+| Script | Use Case | Advantages |
+|--------|----------|------------|
+| `delete-vpc-by-owner.sh` | Batch delete multiple VPCs | Batch operations, high efficiency |
+| `delete-vpc-cloudformation.sh` | Single stack deletion | Most secure, ensures complete deletion |
+| `delete-vpc-by-name.sh` | Only know VPC name | Smart discovery, flexible |
+| `delete-vpc.sh` | Have complete output directory | Most comprehensive deletion process |
 
-这个脚本特别适用于需要批量管理多个VPC堆栈的场景，如清理测试环境、项目迁移等。 
+This script is particularly useful for scenarios requiring batch management of multiple VPC stacks, such as cleaning up test environments or project migrations.
+
+## 📚 Related Documentation
+
+- [Complete Deletion Guide](README-delete-vpc.md) - When you have output directories
+- [Delete by Name Guide](README-delete-by-name.md) - When you only know VPC name
+- [CloudFormation Deletion Guide](README-delete-cloudformation.md) - Using CloudFormation stacks
+- [Quick Delete Guide](QUICK-DELETE.md) - Simplified deletion commands
+- [AWS Organizations Documentation](https://docs.aws.amazon.com/organizations/) - Multi-account management 

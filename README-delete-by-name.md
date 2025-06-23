@@ -1,61 +1,72 @@
-# 通过VPC名称删除VPC
+# Delete VPC by Name Script
 
-这个脚本允许您只通过VPC名称来删除VPC和所有相关资源，即使您丢失了 `vpc-output` 目录。
+The `delete-vpc-by-name.sh` script allows you to delete VPCs and all related resources using only the VPC name, even when you've lost the `vpc-output` directory.
 
-## 🚀 快速使用
+## 🚀 Quick Start
 
 ```bash
-# 给脚本执行权限
+# Make script executable
 chmod +x delete-vpc-by-name.sh
 
-# 预览删除（强烈推荐先运行）
+# Preview deletion (strongly recommended)
 ./delete-vpc-by-name.sh --vpc-name my-cluster-vpc-1234567890 --dry-run
 
-# 执行删除
+# Execute deletion
 ./delete-vpc-by-name.sh --vpc-name my-cluster-vpc-1234567890
 
-# 强制删除（跳过确认）
+# Force deletion (skip confirmations)
 ./delete-vpc-by-name.sh --vpc-name my-cluster-vpc-1234567890 --force
 ```
 
-## 📋 参数说明
+## 📋 Features
 
-- `--vpc-name` - VPC名称（必需）
-- `--region` - AWS区域（默认：us-east-1）
-- `--force` - 强制删除，跳过确认
-- `--dry-run` - 预览模式，不实际删除
-- `--help` - 显示帮助信息
+- **Smart VPC Discovery**: Automatically finds VPC by name tag
+- **CloudFormation Priority**: Uses CloudFormation stack deletion for safety
+- **Fallback Methods**: Multiple deletion strategies if primary method fails
+- **Detailed Information**: Shows VPC details and related resources
+- **Safety Confirmations**: User confirmation for destructive operations
+- **Dry Run Mode**: Preview operations without executing
 
-## 🔍 查找VPC名称
+## 🔧 Command Line Options
 
-如果您不确定VPC的确切名称，可以使用以下命令查找：
+| Option | Description | Default | Required |
+|--------|-------------|---------|----------|
+| `--vpc-name` | VPC name to delete | N/A | Yes |
+| `--region` | AWS region | `us-east-1` | No |
+| `--force` | Skip confirmation prompts | `false` | No |
+| `--dry-run` | Preview operations without executing | `false` | No |
+| `--help` | Display help message | N/A | No |
+
+## 🔍 Finding VPC Names
+
+If you're unsure of the exact VPC name, use these commands:
 
 ```bash
-# 列出所有VPC及其名称
+# List all VPCs with their names
 aws ec2 describe-vpcs \
   --query 'Vpcs[].{Name:Tags[?Key==`Name`].Value|[0],VpcId:VpcId,CidrBlock:CidrBlock}' \
   --output table
 
-# 查找包含特定关键词的VPC
+# Find VPCs containing specific keywords
 aws ec2 describe-vpcs \
   --filters "Name=tag:Name,Values=*my-cluster*" \
   --query 'Vpcs[].{Name:Tags[?Key==`Name`].Value|[0],VpcId:VpcId,CidrBlock:CidrBlock}' \
   --output table
 ```
 
-## 🛠️ 脚本功能
+## 🛠️ Script Functionality
 
-这个脚本会：
+The script performs the following operations:
 
-1. **自动查找VPC** - 通过名称标签查找VPC
-2. **智能检测** - 如果找不到VPC，会尝试查找CloudFormation堆栈
-3. **显示详细信息** - 显示VPC的详细信息和相关资源
-4. **安全删除** - 优先使用CloudFormation堆栈删除（更安全）
-5. **错误处理** - 如果直接删除失败，会尝试其他方法
+1. **VPC Discovery**: Searches for VPC by name tag
+2. **Resource Detection**: Identifies all related AWS resources
+3. **CloudFormation Check**: Looks for associated CloudFormation stack
+4. **Safe Deletion**: Prioritizes CloudFormation stack deletion
+5. **Fallback Cleanup**: Uses alternative methods if needed
 
-## 📊 示例输出
+## 📊 Example Output
 
-### 预览模式
+### Dry Run Mode
 ```
 🗑️  Delete VPC by Name Script
 ==============================
@@ -94,7 +105,7 @@ aws ec2 describe-vpcs \
 To perform actual deletion, run the script without --dry-run
 ```
 
-### 实际删除
+### Actual Deletion
 ```
 🗑️  Delete VPC by Name Script
 ==============================
@@ -139,82 +150,92 @@ Do you want to proceed? (y/N): y
 🎉 Cleanup completed successfully!
 ```
 
-## ⚠️ 注意事项
+## ⚠️ Important Notes
 
-1. **VPC名称格式** - 通常格式为 `cluster-name-vpc-timestamp`
-2. **依赖资源** - 脚本会自动处理所有依赖资源的删除
-3. **CloudFormation优先** - 如果找到CloudFormation堆栈，会优先使用堆栈删除
-4. **安全确认** - 默认需要用户确认，除非使用 `--force` 参数
+### VPC Name Format
+- Typically follows pattern: `cluster-name-vpc-timestamp`
+- Example: `my-cluster-vpc-1703123456`
 
-### ⚠️ 需要注意：
-**脚本会删除账户内**所有**匹配 `vpc` 模式的 CloudFormation stacks**
-- 如果账户内有其他人创建的 VPC stacks，也会被删除
-- 建议使用 `--filter-pattern` 参数进行更精确的过滤
-- 在共享账户中使用时要特别小心
+### Dependency Handling
+- Script automatically handles all dependent resource deletion
+- CloudFormation stack deletion is prioritized for safety
+- Fallback methods available if CloudFormation deletion fails
 
-## 🆘 故障排除
+### Safety Features
+- User confirmation required by default (unless `--force` is used)
+- CloudFormation stack deletion ensures complete resource cleanup
+- Detailed resource information displayed before deletion
 
-### 找不到VPC
+## 🆘 Troubleshooting
+
+### VPC Not Found
 ```bash
-# 检查VPC名称是否正确
+# Check if VPC name is correct
 aws ec2 describe-vpcs --query 'Vpcs[].Tags[?Key==`Name`].Value' --output text
 
-# 检查CloudFormation堆栈
+# Check CloudFormation stacks
 aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE
 ```
 
-### 删除失败
+### Deletion Fails
 ```bash
-# 检查是否有依赖资源
+# Check for dependent resources
 aws ec2 describe-instances --filters "Name=vpc-id,Values=vpc-0123456789abcdef0"
 
-# 手动删除依赖资源
+# Manual deletion of dependent resources
 aws ec2 delete-subnet --subnet-id subnet-0123456789abcdef0
 aws ec2 delete-route-table --route-table-id rtb-0123456789abcdef0
 ```
 
-## 💡 使用建议
+## 💡 Usage Recommendations
 
-1. **总是先预览** - 使用 `--dry-run` 查看将要删除的资源
-2. **备份重要数据** - 删除前确保重要数据已备份
-3. **检查依赖** - 确保没有其他服务依赖此VPC
-4. **监控成本** - 删除后检查AWS账单确认成本变化
+1. **Always Preview First**: Use `--dry-run` to see what will be deleted
+2. **Backup Important Data**: Ensure important data is backed up before deletion
+3. **Check Dependencies**: Verify no other services depend on this VPC
+4. **Monitor Costs**: Check AWS billing to confirm cost changes after deletion
 
-## 🔄 其他删除选项
+## 🔄 Alternative Deletion Options
 
-除了这个脚本，我们还提供了其他删除选项：
+### Other Deletion Scripts
 
-### 1. CloudFormation专用删除脚本
-```bash
-# 使用CloudFormation堆栈名称删除
-./delete-vpc-cloudformation.sh --stack-name my-cluster-vpc-1750419818
+1. **CloudFormation Deletion Script**
+   ```bash
+   # Use CloudFormation stack name
+   ./delete-vpc-cloudformation.sh --stack-name my-cluster-vpc-1750419818
+   
+   # Use cluster name to find stack
+   ./delete-vpc-cloudformation.sh --cluster-name my-cluster
+   ```
 
-# 使用集群名称查找并删除
-./delete-vpc-cloudformation.sh --cluster-name my-cluster
-```
+2. **Batch Deletion by Owner**
+   ```bash
+   # Delete all VPC stacks in account
+   ./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern vpc
+   
+   # Delete specific cluster VPC stacks
+   ./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern my-cluster
+   ```
 
-### 2. 按AWS账户所有者删除
-```bash
-# 删除指定AWS账户中的所有VPC堆栈
-./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern vpc
+3. **Complete Deletion Script** (requires vpc-output directory)
+   ```bash
+   # Use complete deletion script
+   ./delete-vpc.sh --cluster-name my-cluster
+   ```
 
-# 删除特定集群的VPC堆栈
-./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern my-cluster
-```
+## 📋 Script Selection Guide
 
-### 3. 完整删除脚本（需要vpc-output目录）
-```bash
-# 使用完整的删除脚本
-./delete-vpc.sh --cluster-name my-cluster
-```
+| Scenario | Recommended Script | When to Use |
+|----------|-------------------|-------------|
+| Lost vpc-output directory | `delete-vpc-by-name.sh` | Only need VPC name |
+| Know CloudFormation stack name | `delete-vpc-cloudformation.sh` | Direct stack deletion |
+| Batch delete multiple VPCs | `delete-vpc-by-owner.sh` | Bulk operations |
+| Have complete output directory | `delete-vpc.sh` | Most comprehensive process |
 
-## 📋 脚本选择指南
+This script is particularly useful when you've lost the `vpc-output` directory but still need to delete the VPC.
 
-| 场景 | 推荐脚本 | 说明 |
-|------|----------|------|
-| 丢失vpc-output目录 | `delete-vpc-by-name.sh` | 只需要VPC名称 |
-| 知道CloudFormation堆栈名 | `delete-vpc-cloudformation.sh` | 直接删除堆栈 |
-| 批量删除多个VPC | `delete-vpc-by-owner.sh` | 按账户和模式过滤 |
-| 有完整输出目录 | `delete-vpc.sh` | 最完整的删除流程 |
+## 📚 Related Documentation
 
-这个脚本特别适用于您丢失了 `vpc-output` 目录但仍然需要删除VPC的情况。 
+- [Complete Deletion Guide](README-delete-vpc.md) - When you have output directories
+- [CloudFormation Deletion Guide](README-delete-cloudformation.md) - Using CloudFormation stacks
+- [Batch Deletion Guide](README-delete-by-owner.md) - Multiple VPC deletion
+- [Quick Delete Guide](QUICK-DELETE.md) - Simplified deletion commands 
