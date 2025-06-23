@@ -126,20 +126,53 @@ Creates a production-ready VPC with the following features:
 
 Deploys OpenShift cluster using the VPC infrastructure with version-compatible configuration:
 
-- **Version Compatibility**: Generates install-config.yaml with proper OpenShift 4.x format
-- **Automatic Tool Download**: Downloads OpenShift installer and CLI
-- **VPC Integration**: Uses VPC output for configuration
+- **Version Compatibility**: Uses `openshift-install create install-config` for guaranteed compatibility
+- **Manual Configuration**: User manually completes interactive installer prompts
+- **Automatic VPC Integration**: Script automatically patches VPC, subnets, and region settings
+- **Automatic Tool Download**: Downloads OpenShift installer and CLI if needed
 - **Flexible Configuration**: Customizable node counts and instance types
 - **Network Options**: Support for different network types and publish strategies
 - **Dry Run Mode**: Generate config without installing
 - **Automatic Backup**: Always creates backup of install-config.yaml
 
+#### Benefits of This Approach:
+
+- **Guaranteed Compatibility**: Uses official `openshift-install create install-config` for perfect version compatibility
+- **User Control**: You have full control over the initial configuration process
+- **Automatic VPC Integration**: Script handles the complex VPC patching automatically
+- **No Automation Complexity**: Avoids issues with expect scripts or automated input
+- **Reliable**: Works consistently across different OpenShift versions and environments
+- **Transparent**: You can see exactly what configuration is being applied
+
 #### How It Works:
 
-1. **Configuration Generation**: Creates install-config.yaml with proper OpenShift 4.x format
-2. **VPC Integration**: Incorporates VPC information from create-vpc.sh output
+1. **Manual Configuration**: User manually completes `openshift-install create install-config` interactive prompts
+2. **VPC Integration**: Script automatically patches the generated config with VPC information from `create-vpc.sh` output
 3. **Tool Management**: Downloads OpenShift installer and CLI if not present
-4. **Installation**: Runs openshift-install create cluster with generated config
+4. **Installation**: Runs `openshift-install create cluster` with the patched configuration
+
+#### Interactive Configuration Process:
+
+When you run the script, it will guide you through the manual configuration:
+
+```bash
+🔧 Please manually complete the openshift-install create install-config process...
+   The installer will prompt you for:
+   - SSH Public Key
+   - Platform (select: aws)
+   - Region (use: us-east-1)
+   - Base Domain (use: qe.devcluster.openshift.com)
+   - Cluster Name (use: weli-test-cluster)
+   - Pull Secret
+```
+
+**Recommended values for each prompt:**
+- **SSH Public Key**: Your SSH public key for cluster access
+- **Platform**: Select `aws`
+- **Region**: Use the region from your VPC (shown in script output)
+- **Base Domain**: Your base domain for the cluster
+- **Cluster Name**: Your desired cluster name
+- **Pull Secret**: Your Red Hat pull secret JSON content
 
 #### Key Options:
 
@@ -316,8 +349,8 @@ aws ec2 describe-instances \
 
 3. **Configuration Compatibility Issues**
    ```bash
-   # The script generates install-config.yaml with proper OpenShift 4.x format
-   # If you encounter version-specific issues:
+   # The script uses openshift-install create install-config for guaranteed compatibility
+   # If you encounter issues during manual configuration:
    
    # Check the generated install-config.yaml
    cat install-config.yaml
@@ -327,6 +360,9 @@ aws ec2 describe-instances \
    
    # Check OpenShift version compatibility
    ./openshift-install version
+   
+   # If VPC patching failed, check the backup file
+   ls -la install-config.yaml.backup.*
    ```
 
 4. **Bastion Host Issues**
