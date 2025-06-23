@@ -7,8 +7,8 @@ A complete workflow for deploying OpenShift clusters on AWS using the enhanced V
 This workflow consists of three main scripts that work together:
 
 1. **`create-vpc.sh`** - Creates a production-ready VPC with multi-AZ support
-2. **`deploy-openshift.sh`** - Deploys OpenShift cluster using the VPC
-3. **`create-bastion.sh`** - Creates a bastion host for cluster access
+2. **`create-bastion.sh`** - Creates a bastion host for cluster access
+3. **`deploy-openshift.sh`** - Deploys OpenShift cluster using the VPC
 
 ## 🚀 Quick Start
 
@@ -34,7 +34,20 @@ This workflow consists of three main scripts that work together:
   --region us-west-2
 ```
 
-### Step 2: Deploy OpenShift Cluster
+### Step 2: Create Bastion Host
+
+```bash
+# Create bastion host with default settings
+./create-bastion.sh --cluster-name my-openshift-cluster
+
+# Or with custom configuration
+./create-bastion.sh \
+  --cluster-name production-cluster \
+  --instance-type t3.small \
+  --openshift-version 4.15.0
+```
+
+### Step 3: Deploy OpenShift Cluster
 
 ```bash
 # Deploy with default settings (uses vpc-output directory)
@@ -58,18 +71,14 @@ This workflow consists of three main scripts that work together:
   --network-type OVNKubernetes
 ```
 
-### Step 3: Create Bastion Host (Optional)
+**Note**: For private clusters (Internal publish strategy), the deployment process is different:
+1. Create VPC
+2. Create bastion host
+3. Generate `install-config.yaml` locally using `deploy-openshift.sh --dry-run`
+4. Upload configuration to bastion host
+5. Install cluster from bastion host
 
-```bash
-# Create bastion host with default settings
-./create-bastion.sh --cluster-name my-openshift-cluster
-
-# Or with custom configuration
-./create-bastion.sh \
-  --cluster-name production-cluster \
-  --instance-type t3.small \
-  --openshift-version 4.15.0
-```
+See [Private Cluster Installation Guide](README-private-cluster-installation.md) for detailed steps.
 
 ## 📁 Directory Structure
 

@@ -199,14 +199,24 @@ To delete the VPC and all associated resources:
 ```bash
 # Get the stack name from the output
 STACK_NAME=$(cat ./vpc-output/stack-name)
-REGION=$(aws configure get region)
-
-# Delete the stack
-aws cloudformation delete-stack --region $REGION --stack-name $STACK_NAME
-
-# Wait for deletion to complete
-aws cloudformation wait stack-delete-complete --region $REGION --stack-name $STACK_NAME
+aws cloudformation delete-stack --region us-east-1 --stack-name $STACK_NAME
 ```
+
+## Next Steps
+
+After creating the VPC, the next steps depend on your deployment strategy:
+
+### For Private Cluster Installation:
+1. **Create Bastion Host**: `./create-bastion.sh --cluster-name my-cluster`
+2. **Generate install-config.yaml**: `./deploy-openshift.sh --dry-run`
+3. **Upload configuration to bastion host**
+4. **Install cluster from bastion host**
+
+### For External Cluster Installation:
+1. **Deploy OpenShift Cluster**: `./deploy-openshift.sh --publish-strategy External`
+2. **Optional: Create Bastion Host**: `./create-bastion.sh --cluster-name my-cluster`
+
+See [OpenShift Deployment Guide](README-openshift-deployment.md) for detailed instructions.
 
 ## Comparison with Other Scripts
 

@@ -2,6 +2,18 @@
 
 The `create-bastion.sh` script creates a bastion host for accessing private OpenShift clusters with pre-installed OpenShift tools.
 
+## 📋 Workflow Order
+
+**Important**: For private cluster installations, the correct workflow order is:
+
+1. **Create VPC** (`create-vpc.sh`)
+2. **Create Bastion Host** (`create-bastion.sh`) ← You are here
+3. **Generate install-config.yaml** locally (`deploy-openshift.sh --dry-run`)
+4. **Upload configuration to bastion host**
+5. **Install cluster from bastion host**
+
+This order ensures that the bastion host is available before you need to upload cluster configuration files.
+
 ## 🚀 Quick Start
 
 ```bash

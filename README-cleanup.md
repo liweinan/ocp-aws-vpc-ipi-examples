@@ -220,10 +220,12 @@ rm -f *.pem
 
 ### Workflow Integration
 ```bash
-# Complete workflow with cleanup
+# Complete workflow with cleanup (private cluster)
 ./create-vpc.sh --cluster-name my-cluster
-./deploy-openshift.sh --cluster-name my-cluster --base-domain example.com
 ./create-bastion.sh --cluster-name my-cluster
+./deploy-openshift.sh --dry-run
+# Upload install-config.yaml to bastion host
+# Install cluster from bastion host
 
 # ... use cluster ...
 

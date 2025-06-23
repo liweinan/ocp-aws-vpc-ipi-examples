@@ -123,11 +123,19 @@ oc get clusteroperators
 This script works seamlessly with the other scripts in this project:
 
 ```bash
-# Complete workflow example
-./create-vpc.sh --cluster-name my-cluster                    # Create VPC
-./deploy-openshift.sh                                        # Deploy cluster
-./create-bastion.sh --cluster-name my-cluster                # Create bastion
-./connect-bastion.sh --copy-kubeconfig --setup-environment   # Connect and setup
+# Complete workflow example for private cluster
+./create-vpc.sh --cluster-name my-cluster                    # 1. Create VPC
+./create-bastion.sh --cluster-name my-cluster                # 2. Create bastion
+./deploy-openshift.sh --dry-run                              # 3. Generate config locally
+# Upload install-config.yaml to bastion host
+# Install cluster from bastion host
+./connect-bastion.sh --copy-kubeconfig --setup-environment   # 4. Connect and setup
+
+# Complete workflow example for external cluster
+./create-vpc.sh --cluster-name my-cluster                    # 1. Create VPC
+./deploy-openshift.sh --publish-strategy External            # 2. Deploy cluster
+./create-bastion.sh --cluster-name my-cluster                # 3. Create bastion (optional)
+./connect-bastion.sh --copy-kubeconfig --setup-environment   # 4. Connect and setup
 ```
 
 ## 🆘 Troubleshooting
