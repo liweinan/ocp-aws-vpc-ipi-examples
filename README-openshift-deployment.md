@@ -154,7 +154,7 @@ Deploys OpenShift cluster using the VPC infrastructure with version-compatible c
 --control-plane-nodes      # Number of control plane nodes (default: 3)
 --compute-instance-type    # Compute node instance type
 --control-plane-instance-type # Control plane instance type
---publish-strategy         # External or Internal (default: External)
+--publish-strategy         # External or Internal (default: Internal)
 --network-type             # OpenShiftSDN or OVNKubernetes
 --dry-run                  # Generate config only, don't install
 ```

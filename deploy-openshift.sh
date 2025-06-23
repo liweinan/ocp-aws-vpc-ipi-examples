@@ -31,7 +31,7 @@ usage() {
     echo "  --control-plane-nodes Number of control plane nodes (default: 3)"
     echo "  --compute-instance-type Compute node instance type (default: m5.xlarge)"
     echo "  --control-plane-instance-type Control plane instance type (default: m5.xlarge)"
-    echo "  --publish-strategy    Publish strategy: External or Internal (default: External)"
+    echo "  --publish-strategy    Publish strategy: External or Internal (default: Internal)"
     echo "  --network-type        Network type: OpenShiftSDN or OVNKubernetes (default: OVNKubernetes)"
     echo "  --dry-run             Generate install-config.yaml only, don't install"
     echo "  --help                Display this help message"
@@ -171,7 +171,7 @@ COMPUTE_NODES=${COMPUTE_NODES:-3}
 CONTROL_PLANE_NODES=${CONTROL_PLANE_NODES:-3}
 COMPUTE_INSTANCE_TYPE=${COMPUTE_INSTANCE_TYPE:-m5.xlarge}
 CONTROL_PLANE_INSTANCE_TYPE=${CONTROL_PLANE_INSTANCE_TYPE:-m5.xlarge}
-PUBLISH_STRATEGY=${PUBLISH_STRATEGY:-External}
+PUBLISH_STRATEGY=${PUBLISH_STRATEGY:-Internal}
 NETWORK_TYPE=${NETWORK_TYPE:-OVNKubernetes}
 DRY_RUN=${DRY_RUN:-no}
 
