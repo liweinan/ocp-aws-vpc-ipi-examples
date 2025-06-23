@@ -118,6 +118,7 @@ rm openshift-client-linux.tar.gz
 
 # 验证安装程序
 ./openshift-install version
+./oc version
 ```
 
 ### 3.3 配置 AWS 凭证
@@ -203,12 +204,24 @@ aws sts get-caller-identity
 ### 4.1 准备安装目录
 
 ```bash
-# 创建安装目录
-mkdir -p ~/cluster-install
-cd ~/cluster-install
+# 创建专用的集群安装目录
+mkdir -p ~/openshift-cluster
+cd ~/openshift-cluster
 
 # 复制配置文件
 cp ~/install-config.yaml .
+
+# 复制 OpenShift 安装程序到当前目录
+cp ~/openshift-install/openshift-install .
+cp ~/openshift-install/oc .
+cp ~/openshift-install/kubectl .
+
+# 设置执行权限
+chmod +x openshift-install oc kubectl
+
+# 验证安装程序
+./openshift-install version
+./oc version
 
 # 验证配置文件
 ./openshift-install create install-config --dir=. --dry-run
@@ -240,7 +253,7 @@ tail -f install.log
 
 ```
 INFO Install complete!
-INFO To access the cluster as the system:admin user when using 'oc', run 'export KUBECONFIG=/home/ec2-user/cluster-install/auth/kubeconfig'
+INFO To access the cluster as the system:admin user when using 'oc', run 'export KUBECONFIG=/home/ec2-user/openshift-cluster/auth/kubeconfig'
 INFO Access the OpenShift web-console here: https://console-openshift-console.apps.weli-test-cluster.qe.devcluster.openshift.com
 INFO Login to the console with user: "kubeadmin", and password: "xxxxx-xxxxx-xxxxx-xxxxx"
 ```
@@ -251,11 +264,11 @@ INFO Login to the console with user: "kubeadmin", and password: "xxxxx-xxxxx-xxx
 
 ```bash
 # 设置 kubeconfig
-export KUBECONFIG=/home/ec2-user/cluster-install/auth/kubeconfig
+export KUBECONFIG=/home/ec2-user/openshift-cluster/auth/kubeconfig
 
 # 验证集群访问
-oc whoami
-oc get nodes
+./oc whoami
+./oc get nodes
 ```
 
 ### 5.2 访问 Web 控制台
@@ -279,8 +292,8 @@ ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem -L 8443:console-opensh
 
 ```bash
 # 在本地机器上执行，下载集群访问文件
-scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>:~/cluster-install/auth/kubeconfig ~/kubeconfig-weli-test-cluster
-scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>:~/cluster-install/auth/kubeadmin-password ~/kubeadmin-password-weli-test-cluster
+scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>:~/openshift-cluster/auth/kubeconfig ~/kubeconfig-weli-test-cluster
+scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>:~/openshift-cluster/auth/kubeadmin-password ~/kubeadmin-password-weli-test-cluster
 ```
 
 ### 6.2 在本地使用集群
@@ -323,18 +336,33 @@ oc get nodes
    aws iam list-attached-user-policies --user-name <your-username>
    ```
 
+4. **openshift-install 找不到**
+   ```bash
+   # 确保在正确的目录中
+   pwd
+   ls -la openshift-install
+   
+   # 如果文件不存在，重新复制
+   cp ~/openshift-install/openshift-install .
+   chmod +x openshift-install
+   ```
+
 ### 重新开始安装
 
 如果安装失败需要重新开始：
 
 ```bash
 # 清理安装目录
-rm -rf ~/cluster-install
+rm -rf ~/openshift-cluster
 
 # 重新创建目录并复制配置文件
-mkdir -p ~/cluster-install
-cd ~/cluster-install
+mkdir -p ~/openshift-cluster
+cd ~/openshift-cluster
 cp ~/install-config.yaml .
+cp ~/openshift-install/openshift-install .
+cp ~/openshift-install/oc .
+cp ~/openshift-install/kubectl .
+chmod +x openshift-install oc kubectl
 
 # 重新开始安装
 ./openshift-install --log-level=info create cluster --dir=.
@@ -346,7 +374,7 @@ cp ~/install-config.yaml .
 
 ```bash
 # 在 bastion host 上执行
-cd ~/cluster-install
+cd ~/openshift-cluster
 ./openshift-install destroy cluster --dir=.
 ```
 
@@ -355,8 +383,9 @@ cd ~/cluster-install
 1. **本地生成配置**: 使用 `deploy-openshift.sh --dry-run` 生成 `install-config.yaml`
 2. **上传到 Bastion**: 将配置文件上传到 bastion host
 3. **准备环境**: 在 bastion host 上下载安装程序并配置 AWS 凭证
-4. **执行安装**: 使用 `openshift-install create cluster` 开始安装
-5. **监控进度**: 使用详细日志模式监控安装过程
-6. **访问集群**: 通过 kubeconfig 或 Web 控制台访问集群
+4. **创建安装目录**: 使用 `~/openshift-cluster` 作为专用安装目录
+5. **执行安装**: 使用 `openshift-install create cluster` 开始安装
+6. **监控进度**: 使用详细日志模式监控安装过程
+7. **访问集群**: 通过 kubeconfig 或 Web 控制台访问集群
 
 这个流程确保了私有集群能够正确安装，并且您可以从 bastion host 访问集群的所有功能。
