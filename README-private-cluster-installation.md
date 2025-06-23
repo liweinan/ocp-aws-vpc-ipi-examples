@@ -6,6 +6,10 @@
 
 由于您要安装私有集群（Internal 类型），安装过程需要在 bastion host 上执行，因为私有集群的 API 服务器无法从外部网络访问。
 
+**注意：** 在以下命令中，请将 `<bastion-public-ip>` 替换为您实际的 bastion host 公网 IP 地址。您可以通过以下方式获取：
+- 查看 `bastion-output/bastion-public-ip` 文件
+- 或运行 `./connect-bastion.sh` 脚本查看连接信息
+
 ## 步骤 1: 本地生成 install-config.yaml
 
 ### 1.1 检查前置条件
@@ -71,10 +75,10 @@ AWS_PROFILE=static ./deploy-openshift.sh --dry-run
 
 ```bash
 # 设置 SSH 密钥权限
-chmod 600 ~/.ssh/your-key-pair.pem
+chmod 600 ./bastion-output/weli-test-cluster-bastion-key.pem
 
 # 连接到 bastion host
-ssh -i ~/.ssh/your-key-pair.pem ec2-user@<bastion-public-ip>
+ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>
 ```
 
 ## 步骤 3: 在 Bastion Host 上准备安装环境
@@ -85,7 +89,7 @@ ssh -i ~/.ssh/your-key-pair.pem ec2-user@<bastion-public-ip>
 
 ```bash
 # 从本地执行，上传配置文件到 bastion host
-scp -i ~/.ssh/your-key-pair.pem ./openshift-install/install-config.yaml ec2-user@<bastion-public-ip>:~/install-config.yaml
+scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ./openshift-install/install-config.yaml ec2-user@<bastion-public-ip>:~/install-config.yaml
 ```
 
 ### 3.2 在 Bastion Host 上下载 OpenShift 安装程序
@@ -118,9 +122,66 @@ rm openshift-client-linux.tar.gz
 
 ### 3.3 配置 AWS 凭证
 
-确保 bastion host 有正确的 AWS 凭证：
+确保 bastion host 有正确的 AWS 凭证。推荐使用以下方法从本地机器上传凭证：
+
+#### 方法 1: 上传 AWS 凭证文件（推荐）
+
+**从本地机器执行：**
 
 ```bash
+# 上传 AWS 凭证文件到 bastion host
+scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ~/.aws/credentials ec2-user@<bastion-public-ip>:~/.aws/credentials
+
+# 上传 AWS 配置文件
+scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ~/.aws/config ec2-user@<bastion-public-ip>:~/.aws/config
+```
+
+**在 bastion host 上设置权限：**
+
+```bash
+# 连接到 bastion host
+ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>
+
+# 在 bastion host 上创建 .aws 目录并设置权限
+mkdir -p ~/.aws
+chmod 700 ~/.aws
+chmod 600 ~/.aws/credentials
+chmod 600 ~/.aws/config
+
+# 验证凭证
+aws sts get-caller-identity --profile static
+```
+
+#### 方法 2: 使用环境变量
+
+**从本地机器执行：**
+
+```bash
+# 获取您的 AWS 凭证并上传到 bastion host
+aws configure export-credentials --profile static --format env | ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip> "cat > ~/aws-env.sh"
+```
+
+**在 bastion host 上使用：**
+
+```bash
+# 连接到 bastion host
+ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>
+
+# 加载环境变量
+source ~/aws-env.sh
+
+# 验证凭证
+aws sts get-caller-identity
+```
+
+#### 方法 3: 手动配置
+
+**在 bastion host 上执行：**
+
+```bash
+# 创建 .aws 目录
+mkdir -p ~/.aws
+
 # 配置 AWS 凭证
 aws configure --profile static
 
@@ -131,6 +192,11 @@ export AWS_DEFAULT_REGION=us-east-1
 # 验证凭证
 aws sts get-caller-identity
 ```
+
+**重要提示：**
+- 确保 `.aws` 目录权限为 700
+- 确保 `credentials` 和 `config` 文件权限为 600
+- 使用 `--profile static` 参数来指定正确的配置文件
 
 ## 步骤 4: 执行集群安装
 
@@ -202,7 +268,7 @@ curl -k https://console-openshift-console.apps.weli-test-cluster.qe.devcluster.o
 
 # 或者使用 SSH 隧道从本地访问
 # 在本地机器上执行：
-ssh -i ~/.ssh/your-key-pair.pem -L 8443:console-openshift-console.apps.weli-test-cluster.qe.devcluster.openshift.com:443 ec2-user@<bastion-public-ip>
+ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem -L 8443:console-openshift-console.apps.weli-test-cluster.qe.devcluster.openshift.com:443 ec2-user@<bastion-public-ip>
 ```
 
 然后在本地浏览器访问：`https://localhost:8443`
@@ -213,8 +279,8 @@ ssh -i ~/.ssh/your-key-pair.pem -L 8443:console-openshift-console.apps.weli-test
 
 ```bash
 # 在本地机器上执行，下载集群访问文件
-scp -i ~/.ssh/your-key-pair.pem ec2-user@<bastion-public-ip>:~/cluster-install/auth/kubeconfig ~/kubeconfig-weli-test-cluster
-scp -i ~/.ssh/your-key-pair.pem ec2-user@<bastion-public-ip>:~/cluster-install/auth/kubeadmin-password ~/kubeadmin-password-weli-test-cluster
+scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>:~/cluster-install/auth/kubeconfig ~/kubeconfig-weli-test-cluster
+scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>:~/cluster-install/auth/kubeadmin-password ~/kubeadmin-password-weli-test-cluster
 ```
 
 ### 6.2 在本地使用集群
@@ -293,4 +359,4 @@ cd ~/cluster-install
 5. **监控进度**: 使用详细日志模式监控安装过程
 6. **访问集群**: 通过 kubeconfig 或 Web 控制台访问集群
 
-这个流程确保了私有集群能够正确安装，并且您可以从 bastion host 访问集群的所有功能。 
+这个流程确保了私有集群能够正确安装，并且您可以从 bastion host 访问集群的所有功能。
