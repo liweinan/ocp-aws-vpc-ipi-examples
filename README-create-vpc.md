@@ -214,9 +214,10 @@ After creating the VPC, the next steps depend on your deployment strategy:
 
 ### For External Cluster Installation:
 1. **Deploy OpenShift Cluster**: `./deploy-openshift.sh --publish-strategy External`
-2. **Optional: Create Bastion Host**: `./create-bastion.sh --cluster-name my-cluster`
 
 See [OpenShift Deployment Guide](README-openshift-deployment.md) for detailed instructions.
+
+**For external clusters, you do NOT need a bastion host.**
 
 ## Comparison with Other Scripts
 

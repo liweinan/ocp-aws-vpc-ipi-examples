@@ -233,6 +233,8 @@ rm -f *.pem
 ./cleanup.sh --clean-aws
 ```
 
+**For external clusters, you do NOT need a bastion host.**
+
 ### Backup Before Cleanup
 ```bash
 # Create backup before cleanup

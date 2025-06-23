@@ -130,13 +130,9 @@ This script works seamlessly with the other scripts in this project:
 # Upload install-config.yaml to bastion host
 # Install cluster from bastion host
 ./connect-bastion.sh --copy-kubeconfig --setup-environment   # 4. Connect and setup
-
-# Complete workflow example for external cluster
-./create-vpc.sh --cluster-name my-cluster                    # 1. Create VPC
-./deploy-openshift.sh --publish-strategy External            # 2. Deploy cluster
-./create-bastion.sh --cluster-name my-cluster                # 3. Create bastion (optional)
-./connect-bastion.sh --copy-kubeconfig --setup-environment   # 4. Connect and setup
 ```
+
+**For external clusters, you do NOT need a bastion host.**
 
 ## 🆘 Troubleshooting
 

@@ -7,8 +7,8 @@ A complete workflow for deploying OpenShift clusters on AWS using the enhanced V
 This workflow consists of three main scripts that work together:
 
 1. **`create-vpc.sh`** - Creates a production-ready VPC with multi-AZ support
-2. **`create-bastion.sh`** - Creates a bastion host for cluster access
-3. **`deploy-openshift.sh`** - Deploys OpenShift cluster using the VPC
+2. **`deploy-openshift.sh`** - Deploys OpenShift cluster using the VPC
+3. **`create-bastion.sh`** - (Optional, only for private clusters) Creates a bastion host for cluster access
 
 ## 🚀 Quick Start
 
@@ -34,20 +34,7 @@ This workflow consists of three main scripts that work together:
   --region us-west-2
 ```
 
-### Step 2: Create Bastion Host
-
-```bash
-# Create bastion host with default settings
-./create-bastion.sh --cluster-name my-openshift-cluster
-
-# Or with custom configuration
-./create-bastion.sh \
-  --cluster-name production-cluster \
-  --instance-type t3.small \
-  --openshift-version 4.15.0
-```
-
-### Step 3: Deploy OpenShift Cluster
+### Step 2: Deploy OpenShift Cluster
 
 ```bash
 # Deploy with default settings (uses vpc-output directory)
@@ -71,7 +58,14 @@ This workflow consists of three main scripts that work together:
   --network-type OVNKubernetes
 ```
 
-**Note**: For private clusters (Internal publish strategy), the deployment process is different:
+### Step 3: (Private Cluster Only) Create Bastion Host
+
+```bash
+# Only required for private clusters (publish: Internal)
+./create-bastion.sh --cluster-name my-openshift-cluster
+```
+
+**Note**: For private clusters (Internal publish strategy), the deployment process is:
 1. Create VPC
 2. Create bastion host
 3. Generate `install-config.yaml` locally using `deploy-openshift.sh --dry-run`
@@ -79,6 +73,8 @@ This workflow consists of three main scripts that work together:
 5. Install cluster from bastion host
 
 See [Private Cluster Installation Guide](README-private-cluster-installation.md) for detailed steps.
+
+**For external clusters, you do NOT need a bastion host.**
 
 ## 📁 Directory Structure
 

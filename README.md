@@ -16,10 +16,7 @@ This directory contains configuration files and automation scripts for setting u
 # 1. Create VPC infrastructure
 ./create-vpc.sh --cluster-name my-cluster --region us-east-1
 
-# 2. Create bastion host (for private clusters)
-./create-bastion.sh --cluster-name my-cluster
-
-# 3. Deploy OpenShift cluster
+# 2. Deploy OpenShift cluster
 ./deploy-openshift.sh \
   --cluster-name my-cluster \
   --base-domain example.com \
@@ -27,7 +24,7 @@ This directory contains configuration files and automation scripts for setting u
   --ssh-key "$(cat ~/.ssh/id_rsa.pub)"
 ```
 
-### Private Cluster Installation
+### Private Cluster Installation (Requires Bastion Host)
 
 For private cluster installation (Internal publish strategy), see the detailed guide:
 **[Private Cluster Installation Guide](README-private-cluster-installation.md)**
@@ -44,6 +41,8 @@ This guide covers:
 3. Generate `install-config.yaml` locally
 4. Upload configuration to bastion host
 5. Install cluster from bastion host
+
+**For external clusters, you do NOT need a bastion host.**
 
 ## 📋 Script Overview
 
