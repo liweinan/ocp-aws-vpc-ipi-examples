@@ -245,20 +245,25 @@ EOF
             echo "  - $item"
         done
     else
+        local orig_dir=$(pwd)
         cd "$temp_dir"
-        zip -r "$backup_path" . > /dev/null
-        cd - > /dev/null
-        
-        # Get backup size
-        local backup_size=$(du -h "$backup_path" | cut -f1)
-        
-        print_success "Backup created successfully!"
-        print_info "Backup file: $backup_path"
-        print_info "Backup size: $backup_size"
-        print_info "Backup contents:"
-        for item in "${backup_contents[@]}"; do
-            echo "  - $item"
-        done
+        if zip -r "$orig_dir/$backup_path" .; then
+            cd "$orig_dir"
+            # Get backup size
+            local backup_size=$(du -h "$backup_path" | cut -f1)
+            print_success "Backup created successfully!"
+            print_info "Backup file: $backup_path"
+            print_info "Backup size: $backup_size"
+            print_info "Backup contents:"
+            for item in "${backup_contents[@]}"; do
+                echo "  - $item"
+            done
+        else
+            cd "$orig_dir"
+            print_error "Failed to create zip file: $backup_path"
+            print_error "Please check if you have write permissions to $BACKUP_DIR"
+            return 1
+        fi
     fi
     
     # Cleanup temp directory
