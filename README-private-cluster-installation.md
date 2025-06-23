@@ -62,17 +62,17 @@ AWS_PROFILE=static ./deploy-openshift.sh --dry-run
 
 ```bash
 # 从本地机器执行，复制您的SSH私钥到bastion host
-scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ~/.ssh/id_rsa ec2-user@<bastion-public-ip>:~/.ssh/id_rsa
+scp -i ./bastion-output/your-bastion-key.pem ~/.ssh/id_rsa ec2-user@<bastion-public-ip>:~/.ssh/id_rsa
 
 # 复制公钥（可选，用于验证）
-scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ~/.ssh/id_rsa.pub ec2-user@<bastion-public-ip>:~/.ssh/id_rsa.pub
+scp -i ./bastion-output/your-bastion-key.pem ~/.ssh/id_rsa.pub ec2-user@<bastion-public-ip>:~/.ssh/id_rsa.pub
 ```
 
 **在bastion host上设置SSH密钥权限：**
 
 ```bash
 # 连接到bastion host
-ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>
+ssh -i ./bastion-output/your-bastion-key.pem ec2-user@<bastion-public-ip>
 
 # 在bastion host上设置SSH密钥权限
 chmod 700 ~/.ssh
@@ -120,10 +120,10 @@ oc debug node/<node-name>
 
 ```bash
 # 设置 SSH 密钥权限
-chmod 600 ./bastion-output/weli-test-cluster-bastion-key.pem
+chmod 600 ./bastion-output/your-bastion-key.pem
 
 # 连接到 bastion host
-ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>
+ssh -i ./bastion-output/your-bastion-key.pem ec2-user@<bastion-public-ip>
 ```
 
 ## 步骤 3: 在 Bastion Host 上准备安装环境
@@ -134,7 +134,7 @@ ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-publ
 
 ```bash
 # 从本地执行，上传配置文件到 bastion host
-scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ./openshift-install/install-config.yaml ec2-user@<bastion-public-ip>:~/install-config.yaml
+scp -i ./bastion-output/your-bastion-key.pem ./openshift-install/install-config.yaml ec2-user@<bastion-public-ip>:~/install-config.yaml
 ```
 
 ### 3.2 在 Bastion Host 上下载 OpenShift 安装程序
@@ -176,17 +176,17 @@ rm openshift-client-linux.tar.gz
 
 ```bash
 # 上传 AWS 凭证文件到 bastion host
-scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ~/.aws/credentials ec2-user@<bastion-public-ip>:~/.aws/credentials
+scp -i ./bastion-output/your-bastion-key.pem ~/.aws/credentials ec2-user@<bastion-public-ip>:~/.aws/credentials
 
 # 上传 AWS 配置文件
-scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ~/.aws/config ec2-user@<bastion-public-ip>:~/.aws/config
+scp -i ./bastion-output/your-bastion-key.pem ~/.aws/config ec2-user@<bastion-public-ip>:~/.aws/config
 ```
 
 **在 bastion host 上设置权限：**
 
 ```bash
 # 连接到 bastion host
-ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>
+ssh -i ./bastion-output/your-bastion-key.pem ec2-user@<bastion-public-ip>
 
 # 在 bastion host 上创建 .aws 目录并设置权限
 mkdir -p ~/.aws
@@ -204,14 +204,14 @@ aws sts get-caller-identity --profile static
 
 ```bash
 # 获取您的 AWS 凭证并上传到 bastion host
-aws configure export-credentials --profile static --format env | ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip> "cat > ~/aws-env.sh"
+aws configure export-credentials --profile static --format env | ssh -i ./bastion-output/your-bastion-key.pem ec2-user@<bastion-public-ip> "cat > ~/aws-env.sh"
 ```
 
 **在 bastion host 上使用：**
 
 ```bash
 # 连接到 bastion host
-ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>
+ssh -i ./bastion-output/your-bastion-key.pem ec2-user@<bastion-public-ip>
 
 # 加载环境变量
 source ~/aws-env.sh
@@ -252,17 +252,17 @@ aws sts get-caller-identity
 
 ```bash
 # 复制您的SSH私钥到bastion host
-scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ~/.ssh/id_rsa ec2-user@<bastion-public-ip>:~/.ssh/id_rsa
+scp -i ./bastion-output/your-bastion-key.pem ~/.ssh/id_rsa ec2-user@<bastion-public-ip>:~/.ssh/id_rsa
 
 # 复制公钥（可选，用于验证）
-scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ~/.ssh/id_rsa.pub ec2-user@<bastion-public-ip>:~/.ssh/id_rsa.pub
+scp -i ./bastion-output/your-bastion-key.pem ~/.ssh/id_rsa.pub ec2-user@<bastion-public-ip>:~/.ssh/id_rsa.pub
 ```
 
 #### 在bastion host上设置SSH密钥权限
 
 ```bash
 # 连接到bastion host
-ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>
+ssh -i ./bastion-output/your-bastion-key.pem ec2-user@<bastion-public-ip>
 
 # 在bastion host上设置SSH密钥权限
 chmod 700 ~/.ssh
@@ -376,7 +376,7 @@ curl -k https://console-openshift-console.apps.weli-test-cluster.qe.devcluster.o
 
 # 或者使用 SSH 隧道从本地访问
 # 在本地机器上执行：
-ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem -L 8443:console-openshift-console.apps.weli-test-cluster.qe.devcluster.openshift.com:443 ec2-user@<bastion-public-ip>
+ssh -i ./bastion-output/your-bastion-key.pem -L 8443:console-openshift-console.apps.weli-test-cluster.qe.devcluster.openshift.com:443 ec2-user@<bastion-public-ip>
 ```
 
 然后在本地浏览器访问：`https://localhost:8443`
@@ -387,8 +387,8 @@ ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem -L 8443:console-opensh
 
 ```bash
 # 在本地机器上执行，下载集群访问文件
-scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>:~/openshift-cluster/auth/kubeconfig ~/kubeconfig-weli-test-cluster
-scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>:~/openshift-cluster/auth/kubeadmin-password ~/kubeadmin-password-weli-test-cluster
+scp -i ./bastion-output/your-bastion-key.pem ec2-user@<bastion-public-ip>:~/openshift-cluster/auth/kubeconfig ~/kubeconfig-weli-test-cluster
+scp -i ./bastion-output/your-bastion-key.pem ec2-user@<bastion-public-ip>:~/openshift-cluster/auth/kubeadmin-password ~/kubeadmin-password-weli-test-cluster
 ```
 
 ### 6.2 在本地使用集群
@@ -464,7 +464,7 @@ oc get nodes
    ls -la ~/.ssh/id_rsa
    
    # 重新复制SSH私钥（从本地机器执行）
-   scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ~/.ssh/id_rsa ec2-user@<bastion-public-ip>:~/.ssh/id_rsa
+   scp -i ./bastion-output/your-bastion-key.pem ~/.ssh/id_rsa ec2-user@<bastion-public-ip>:~/.ssh/id_rsa
    
    # 在bastion host上设置权限
    chmod 600 ~/.ssh/id_rsa
