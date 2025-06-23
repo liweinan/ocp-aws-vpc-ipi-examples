@@ -140,6 +140,12 @@ aws organizations list-accounts --query 'Accounts[].{Id:Id,Name:Name,Status:Stat
 3. **依赖关系** - 确保没有服务依赖这些VPC
 4. **权限要求** - 需要足够的权限删除所有堆栈
 
+### ⚠️ 需要注意：
+**脚本会删除账户内**所有**匹配 `vpc` 模式的 CloudFormation stacks**
+- 如果账户内有其他人创建的 VPC stacks，也会被删除
+- 建议使用 `--filter-pattern` 参数进行更精确的过滤
+- 在共享账户中使用时要特别小心
+
 ### 安全建议
 - **总是先预览** - 使用 `--dry-run` 查看将要删除的堆栈
 - **分批删除** - 不要一次性删除太多堆栈

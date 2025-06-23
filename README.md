@@ -799,6 +799,12 @@ aws ec2 describe-key-pairs --key-names my-cluster-key
 - 负载均衡器
 - 安全组
 
+### ⚠️ 需要注意：
+**脚本会删除账户内**所有**匹配 `vpc` 模式的 CloudFormation stacks**
+- 如果账户内有其他人创建的 VPC stacks，也会被删除
+- 建议使用 `--filter-pattern` 参数进行更精确的过滤
+- 在共享账户中使用时要特别小心
+
 ## 📋 删除前检查清单
 
 在删除VPC之前，请确认：

@@ -146,6 +146,12 @@ Do you want to proceed? (y/N): y
 3. **CloudFormation优先** - 如果找到CloudFormation堆栈，会优先使用堆栈删除
 4. **安全确认** - 默认需要用户确认，除非使用 `--force` 参数
 
+### ⚠️ 需要注意：
+**脚本会删除账户内**所有**匹配 `vpc` 模式的 CloudFormation stacks**
+- 如果账户内有其他人创建的 VPC stacks，也会被删除
+- 建议使用 `--filter-pattern` 参数进行更精确的过滤
+- 在共享账户中使用时要特别小心
+
 ## 🆘 故障排除
 
 ### 找不到VPC
