@@ -27,6 +27,17 @@ This directory contains configuration files and automation scripts for setting u
 ./create-bastion.sh --cluster-name my-cluster
 ```
 
+### Private Cluster Installation
+
+For private cluster installation (Internal publish strategy), see the detailed guide:
+**[Private Cluster Installation Guide](README-private-cluster-installation.md)**
+
+This guide covers:
+- Local `install-config.yaml` generation
+- Bastion host setup and connection
+- Cluster installation from bastion host
+- Post-installation access and verification
+
 ## 📋 Script Overview
 
 | Script | Purpose | Documentation |
