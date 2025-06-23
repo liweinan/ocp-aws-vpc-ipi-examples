@@ -47,9 +47,9 @@ chmod +x create-bastion.sh
 |--------|-------------|---------|----------|
 | `--cluster-name` | Cluster name for tagging | `my-cluster` | Yes |
 | `--vpc-output-dir` | Directory containing VPC output | `./vpc-output` | No |
-| `--instance-type` | Bastion instance type | `t3.micro` | No |
+| `--instance-type` | Bastion instance type | `t3.large` | No |
 | `--ssh-key-name` | SSH key pair name | `{cluster-name}-bastion-key` | No |
-| `--openshift-version` | OpenShift version to install | `4.15.0` | No |
+| `--openshift-version` | OpenShift version to install | `latest` | No |
 | `--use-rhcos` | Use RHCOS instead of Amazon Linux | `no` | No |
 | `--output-dir` | Directory to save bastion info | `./bastion-output` | No |
 | `--region` | AWS region | `us-east-1` | No |
@@ -64,9 +64,9 @@ chmod +x create-bastion.sh
 📋 Configuration:
    Cluster Name: my-cluster
    VPC Output Dir: ./vpc-output
-   Instance Type: t3.micro
+   Instance Type: t3.large
    SSH Key Name: my-cluster-bastion-key
-   OpenShift Version: 4.15.0
+   OpenShift Version: latest
    Use RHCOS: no
    Output Dir: ./bastion-output
    Region: us-east-1
@@ -289,8 +289,8 @@ oc get clusteroperators
 
 ## 💰 Cost Optimization
 
-- Use `t3.micro` for development environments
-- Use `t3.small` or `t3.medium` for production
+- Use `t3.large` for development environments (recommended)
+- Use `t3.xlarge` for production workloads
 - Consider using Spot instances for cost savings
 - Terminate bastion when not in use
 
@@ -337,4 +337,11 @@ For easy bastion host connection, use the `connect-bastion.sh` script:
 ./connect-bastion.sh --copy-kubeconfig --setup-environment
 ```
 
-See [Bastion Connection Guide](README-connect-bastion.md) for detailed usage. 
+See [Bastion Connection Guide](README-connect-bastion.md) for detailed usage.
+
+## 💡 Performance Recommendations
+
+### Instance Type Selection
+- Use `t3.large` for development environments (recommended)
+- Use `t3.xlarge` for production workloads
+- Use `t3.2xlarge` for heavy cluster management tasks 

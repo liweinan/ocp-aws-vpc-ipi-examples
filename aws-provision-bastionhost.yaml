@@ -11,7 +11,7 @@ parameters:
   value: us-east-1
 - name: instance_type
   required: true
-  value: t3.micro
+  value: t3.large
 - name: key_name
   required: true
   value: openshift-key
