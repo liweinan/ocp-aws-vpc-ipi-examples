@@ -362,7 +362,7 @@ echo ""
 # Check what will be backed up
 print_info "Checking for files and directories to backup..."
 
-local found_items=0
+found_items=0
 
 # Check directories
 check_directory "$VPC_OUTPUT_DIR" "VPC output directory" && found_items=$((found_items + 1))
