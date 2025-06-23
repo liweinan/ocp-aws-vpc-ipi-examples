@@ -252,30 +252,10 @@ else
     fi
 fi
 
-# Generate install-config.yaml using openshift-install
-echo "📝 Generating install-config.yaml using openshift-install..."
+# Generate install-config.yaml manually with proper OpenShift compatibility
+echo "📝 Generating install-config.yaml..."
 
-# Change to installation directory
-cd "$INSTALL_DIR"
-
-# Create initial install-config.yaml using openshift-install
-echo "🔧 Creating initial install-config.yaml..."
-$INSTALLER_PATH create install-config \
-    --dir=. \
-    --log-level=info \
-    --base-domain="$BASE_DOMAIN" \
-    --cluster-name="$CLUSTER_NAME" \
-    --region="$REGION" \
-    --pull-secret="$PULL_SECRET" \
-    --ssh-key="$SSH_KEY" \
-    --platform=aws
-
-echo "✅ Initial install-config.yaml created successfully!"
-
-# Update install-config.yaml with VPC information from create-vpc.sh
-echo "🔧 Updating install-config.yaml with VPC configuration..."
-
-# Read VPC information
+# Read VPC information before changing directories
 VPC_ID=$(cat "$VPC_OUTPUT_DIR/vpc-id" | tr -d '\n')
 PRIVATE_SUBNET_IDS=$(cat "$VPC_OUTPUT_DIR/private-subnet-ids" | tr -d '\n')
 AVAILABILITY_ZONES=$(cat "$VPC_OUTPUT_DIR/availability-zones" | tr -d '\n')
@@ -294,8 +274,12 @@ for az in "${AZ_ARRAY[@]}"; do
     AZ_YAML="${AZ_YAML}      - ${az}"$'\n'
 done
 
-# Create a temporary file with the updated configuration
-cat > install-config.yaml.tmp <<EOF
+# Change to installation directory
+cd "$INSTALL_DIR"
+
+# Create install-config.yaml with proper OpenShift 4.x format
+echo "🔧 Creating install-config.yaml..."
+cat > install-config.yaml <<EOF
 apiVersion: v1
 baseDomain: ${BASE_DOMAIN}
 compute:
@@ -339,15 +323,11 @@ sshKey: |
   ${SSH_KEY}
 EOF
 
-# Replace the original install-config.yaml with our updated version
-mv install-config.yaml.tmp install-config.yaml
-
-echo "✅ install-config.yaml updated with VPC configuration!"
-echo ""
+echo "✅ install-config.yaml created successfully!"
 
 # Create backup of install-config.yaml (always backup to prevent loss during installation)
-BACKUP_FILE="$INSTALL_DIR/install-config.yaml.backup.$(date +%Y%m%d-%H%M%S)"
-cp "$INSTALL_DIR/install-config.yaml" "$BACKUP_FILE"
+BACKUP_FILE="install-config.yaml.backup.$(date +%Y%m%d-%H%M%S)"
+cp "install-config.yaml" "$BACKUP_FILE"
 echo "✅ Backup created: $BACKUP_FILE"
 echo ""
 

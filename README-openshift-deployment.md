@@ -126,7 +126,7 @@ Creates a production-ready VPC with the following features:
 
 Deploys OpenShift cluster using the VPC infrastructure with version-compatible configuration:
 
-- **Version Compatibility**: Uses `openshift-install create install-config` for compatibility
+- **Version Compatibility**: Generates install-config.yaml with proper OpenShift 4.x format
 - **Automatic Tool Download**: Downloads OpenShift installer and CLI
 - **VPC Integration**: Uses VPC output for configuration
 - **Flexible Configuration**: Customizable node counts and instance types
@@ -136,10 +136,10 @@ Deploys OpenShift cluster using the VPC infrastructure with version-compatible c
 
 #### How It Works:
 
-1. **Initial Configuration**: Uses `openshift-install create install-config` to generate a base configuration
-2. **VPC Integration**: Updates the configuration with VPC-specific settings from `create-vpc.sh` output
-3. **Customization**: Applies custom node counts, instance types, and network settings
-4. **Installation**: Proceeds with cluster creation using the updated configuration
+1. **Configuration Generation**: Creates install-config.yaml with proper OpenShift 4.x format
+2. **VPC Integration**: Incorporates VPC information from create-vpc.sh output
+3. **Tool Management**: Downloads OpenShift installer and CLI if not present
+4. **Installation**: Runs openshift-install create cluster with generated config
 
 #### Key Options:
 
@@ -316,18 +316,17 @@ aws ec2 describe-instances \
 
 3. **Configuration Compatibility Issues**
    ```bash
-   # The script now uses openshift-install create install-config for compatibility
+   # The script generates install-config.yaml with proper OpenShift 4.x format
    # If you encounter version-specific issues:
    
    # Check the generated install-config.yaml
-   cat openshift-install/install-config.yaml
+   cat install-config.yaml
    
-   # Regenerate with specific version
-   ./deploy-openshift.sh \
-     --openshift-version 4.17.0 \
-     --dry-run \
-     --pull-secret "$(cat pull-secret.json)" \
-     --ssh-key "$(cat ~/.ssh/id_rsa.pub)"
+   # Validate the configuration
+   ./openshift-install create manifests --dir=.
+   
+   # Check OpenShift version compatibility
+   ./openshift-install version
    ```
 
 4. **Bastion Host Issues**
