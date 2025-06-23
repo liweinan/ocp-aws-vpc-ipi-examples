@@ -252,8 +252,33 @@ else
     fi
 fi
 
-# Generate install-config.yaml
-echo "📝 Generating install-config.yaml..."
+# Generate install-config.yaml using openshift-install
+echo "📝 Generating install-config.yaml using openshift-install..."
+
+# Change to installation directory
+cd "$INSTALL_DIR"
+
+# Create initial install-config.yaml using openshift-install
+echo "🔧 Creating initial install-config.yaml..."
+$INSTALLER_PATH create install-config \
+    --dir=. \
+    --log-level=info \
+    --base-domain="$BASE_DOMAIN" \
+    --cluster-name="$CLUSTER_NAME" \
+    --region="$REGION" \
+    --pull-secret="$PULL_SECRET" \
+    --ssh-key="$SSH_KEY" \
+    --platform=aws
+
+echo "✅ Initial install-config.yaml created successfully!"
+
+# Update install-config.yaml with VPC information from create-vpc.sh
+echo "🔧 Updating install-config.yaml with VPC configuration..."
+
+# Read VPC information
+VPC_ID=$(cat "$VPC_OUTPUT_DIR/vpc-id" | tr -d '\n')
+PRIVATE_SUBNET_IDS=$(cat "$VPC_OUTPUT_DIR/private-subnet-ids" | tr -d '\n')
+AVAILABILITY_ZONES=$(cat "$VPC_OUTPUT_DIR/availability-zones" | tr -d '\n')
 
 # Convert comma-separated subnets to array format
 IFS=',' read -ra SUBNET_ARRAY <<< "$PRIVATE_SUBNET_IDS"
@@ -262,7 +287,15 @@ for subnet in "${SUBNET_ARRAY[@]}"; do
     SUBNET_YAML="${SUBNET_YAML}    - ${subnet}"$'\n'
 done
 
-cat > "$INSTALL_DIR/install-config.yaml" <<EOF
+# Convert availability zones to array format
+IFS=',' read -ra AZ_ARRAY <<< "$AVAILABILITY_ZONES"
+AZ_YAML=""
+for az in "${AZ_ARRAY[@]}"; do
+    AZ_YAML="${AZ_YAML}      - ${az}"$'\n'
+done
+
+# Create a temporary file with the updated configuration
+cat > install-config.yaml.tmp <<EOF
 apiVersion: v1
 baseDomain: ${BASE_DOMAIN}
 compute:
@@ -273,8 +306,7 @@ compute:
     aws:
       type: ${COMPUTE_INSTANCE_TYPE}
       zones:
-$(echo "$AVAILABILITY_ZONES" | tr ',' '\n' | sed 's/^/      - /')
-  replicas: ${COMPUTE_NODES}
+${AZ_YAML}  replicas: ${COMPUTE_NODES}
 controlPlane:
   architecture: amd64
   hyperthreading: Enabled
@@ -283,8 +315,7 @@ controlPlane:
     aws:
       type: ${CONTROL_PLANE_INSTANCE_TYPE}
       zones:
-$(echo "$AVAILABILITY_ZONES" | tr ',' '\n' | sed 's/^/      - /')
-  replicas: ${CONTROL_PLANE_NODES}
+${AZ_YAML}  replicas: ${CONTROL_PLANE_NODES}
 metadata:
   name: ${CLUSTER_NAME}
 networking:
@@ -308,7 +339,10 @@ sshKey: |
   ${SSH_KEY}
 EOF
 
-echo "✅ install-config.yaml generated successfully!"
+# Replace the original install-config.yaml with our updated version
+mv install-config.yaml.tmp install-config.yaml
+
+echo "✅ install-config.yaml updated with VPC configuration!"
 echo ""
 
 # Create backup of install-config.yaml (always backup to prevent loss during installation)
@@ -361,8 +395,6 @@ fi
 echo "🚀 Starting OpenShift installation..."
 echo "⏳ This process will take approximately 30-45 minutes..."
 echo ""
-
-cd "$INSTALL_DIR"
 
 # Create cluster
 $INSTALLER_PATH create cluster --log-level=info

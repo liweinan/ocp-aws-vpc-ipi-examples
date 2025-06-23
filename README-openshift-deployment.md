@@ -124,13 +124,22 @@ Creates a production-ready VPC with the following features:
 
 ### OpenShift Deployment (`deploy-openshift.sh`)
 
-Deploys OpenShift cluster using the VPC infrastructure:
+Deploys OpenShift cluster using the VPC infrastructure with version-compatible configuration:
 
+- **Version Compatibility**: Uses `openshift-install create install-config` for compatibility
 - **Automatic Tool Download**: Downloads OpenShift installer and CLI
 - **VPC Integration**: Uses VPC output for configuration
 - **Flexible Configuration**: Customizable node counts and instance types
 - **Network Options**: Support for different network types and publish strategies
 - **Dry Run Mode**: Generate config without installing
+- **Automatic Backup**: Always creates backup of install-config.yaml
+
+#### How It Works:
+
+1. **Initial Configuration**: Uses `openshift-install create install-config` to generate a base configuration
+2. **VPC Integration**: Updates the configuration with VPC-specific settings from `create-vpc.sh` output
+3. **Customization**: Applies custom node counts, instance types, and network settings
+4. **Installation**: Proceeds with cluster creation using the updated configuration
 
 #### Key Options:
 
@@ -145,7 +154,7 @@ Deploys OpenShift cluster using the VPC infrastructure:
 --control-plane-nodes      # Number of control plane nodes (default: 3)
 --compute-instance-type    # Compute node instance type
 --control-plane-instance-type # Control plane instance type
---publish-strategy         # External or Internal (default: Internal)
+--publish-strategy         # External or Internal (default: External)
 --network-type             # OpenShiftSDN or OVNKubernetes
 --dry-run                  # Generate config only, don't install
 ```
@@ -300,9 +309,28 @@ aws ec2 describe-instances \
    
    # Validate install-config.yaml
    ./openshift-install create manifests --dir=.
+   
+   # Check version compatibility
+   ./openshift-install version
    ```
 
-3. **Bastion Host Issues**
+3. **Configuration Compatibility Issues**
+   ```bash
+   # The script now uses openshift-install create install-config for compatibility
+   # If you encounter version-specific issues:
+   
+   # Check the generated install-config.yaml
+   cat openshift-install/install-config.yaml
+   
+   # Regenerate with specific version
+   ./deploy-openshift.sh \
+     --openshift-version 4.17.0 \
+     --dry-run \
+     --pull-secret "$(cat pull-secret.json)" \
+     --ssh-key "$(cat ~/.ssh/id_rsa.pub)"
+   ```
+
+4. **Bastion Host Issues**
    ```bash
    # Check instance status
    aws ec2 describe-instances --instance-ids i-1234567890abcdef0
@@ -310,6 +338,14 @@ aws ec2 describe-instances \
    # Check security group
    aws ec2 describe-security-groups --group-ids sg-1234567890abcdef0
    ```
+
+### Version Compatibility
+
+The script now uses `openshift-install create install-config` to ensure compatibility with different OpenShift versions:
+
+- **Automatic Version Detection**: The installer generates configuration compatible with the specified version
+- **VPC Integration**: After generating the base config, the script updates it with VPC information
+- **Backup Protection**: Always creates a backup before modifying the configuration
 
 ### Debug Mode
 
@@ -322,6 +358,9 @@ aws ec2 describe-instances \
   --dry-run \
   --pull-secret "$(cat pull-secret.json)" \
   --ssh-key "$(cat ~/.ssh/id_rsa.pub)"
+
+# Check the generated configuration
+cat openshift-install/install-config.yaml
 ```
 
 ## 🧹 Cleanup
