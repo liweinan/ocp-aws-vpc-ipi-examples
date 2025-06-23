@@ -311,6 +311,12 @@ EOF
 echo "✅ install-config.yaml generated successfully!"
 echo ""
 
+# Create backup of install-config.yaml (always backup to prevent loss during installation)
+BACKUP_FILE="$INSTALL_DIR/install-config.yaml.backup.$(date +%Y%m%d-%H%M%S)"
+cp "$INSTALL_DIR/install-config.yaml" "$BACKUP_FILE"
+echo "✅ Backup created: $BACKUP_FILE"
+echo ""
+
 # Display configuration summary
 echo "📊 OpenShift Configuration Summary:"
 echo "   Cluster Name: $CLUSTER_NAME"
@@ -326,12 +332,15 @@ echo "   Installation Directory: $INSTALL_DIR"
 echo ""
 
 if [[ "$DRY_RUN" == "yes" ]]; then
-    echo "🔍 Dry run mode - install-config.yaml generated only"
+    echo "🔍 DRY RUN MODE - Only generating install-config.yaml, no installation will be performed"
     echo "📁 Files created:"
     echo "   $INSTALL_DIR/install-config.yaml"
+    echo "   $BACKUP_FILE"
     echo ""
     echo "To proceed with installation, run:"
     echo "cd $INSTALL_DIR && ./openshift-install create cluster"
+    echo ""
+    echo "💡 Tip: You can also run this script without --dry-run to proceed with installation"
     exit 0
 fi
 
