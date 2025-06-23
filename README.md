@@ -649,9 +649,54 @@ For more information about bastion host setup, refer to the OpenShift installati
 
 ## 🗑️ 安全删除VPC
 
-当您需要删除VPC和所有相关资源时，我们提供了一个安全的删除脚本。
+当您需要删除VPC和所有相关资源时，我们提供了多种删除脚本以适应不同的场景。
 
-### 快速删除
+## 📋 删除脚本概览
+
+| 脚本 | 适用场景 | 优势 | 文档 |
+|------|----------|------|------|
+| `delete-vpc.sh` | 有完整的vpc-output目录 | 最完整的删除流程，包含OpenShift集群 | [完整删除指南](README-delete-vpc.md) |
+| `delete-vpc-by-name.sh` | 只知道VPC名称 | 智能查找，丢失输出目录时使用 | [按名称删除指南](README-delete-by-name.md) |
+| `delete-vpc-cloudformation.sh` | 知道CloudFormation堆栈名 | 最安全，确保完整删除 | [CloudFormation删除指南](README-delete-cloudformation.md) |
+| `delete-vpc-by-owner.sh` | 批量删除多个VPC | 批量操作，效率高 | [按所有者删除指南](README-delete-by-owner.md) |
+
+## 🚀 快速选择指南
+
+### 场景1：有完整的输出目录
+```bash
+# 使用完整的删除脚本
+chmod +x delete-vpc.sh
+./delete-vpc.sh --cluster-name my-cluster --dry-run
+./delete-vpc.sh --cluster-name my-cluster
+```
+
+### 场景2：丢失了vpc-output目录
+```bash
+# 使用按名称删除脚本
+chmod +x delete-vpc-by-name.sh
+./delete-vpc-by-name.sh --vpc-name my-cluster-vpc-1750419818 --dry-run
+./delete-vpc-by-name.sh --vpc-name my-cluster-vpc-1750419818
+```
+
+### 场景3：知道CloudFormation堆栈名
+```bash
+# 使用CloudFormation删除脚本（推荐）
+chmod +x delete-vpc-cloudformation.sh
+./delete-vpc-cloudformation.sh --stack-name my-cluster-vpc-1750419818 --dry-run
+./delete-vpc-cloudformation.sh --stack-name my-cluster-vpc-1750419818
+```
+
+### 场景4：批量删除多个VPC
+```bash
+# 使用按所有者删除脚本
+chmod +x delete-vpc-by-owner.sh
+./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern my-cluster --dry-run
+./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern my-cluster
+```
+
+## 🛠️ 详细删除指南
+
+### 完整删除脚本（推荐用于有输出目录的情况）
 
 ```bash
 # 给删除脚本执行权限
@@ -744,7 +789,7 @@ aws ec2 describe-instances \
 aws ec2 describe-key-pairs --key-names my-cluster-key
 ```
 
-### 重要警告
+## ⚠️ 重要警告
 
 ⚠️ **删除VPC是一个不可逆的操作！** 删除后，所有相关的AWS资源将被永久删除，包括：
 - OpenShift集群和所有节点
@@ -754,7 +799,7 @@ aws ec2 describe-key-pairs --key-names my-cluster-key
 - 负载均衡器
 - 安全组
 
-### 删除前检查清单
+## 📋 删除前检查清单
 
 在删除VPC之前，请确认：
 - [ ] 已备份重要的数据和配置
@@ -763,4 +808,10 @@ aws ec2 describe-key-pairs --key-names my-cluster-key
 - [ ] 已记录当前的网络配置（如需要）
 - [ ] 已检查AWS账单，了解当前成本
 
-详细说明请参考 [安全删除VPC指南](README-delete-vpc.md)。 
+## 📚 详细文档
+
+- [完整删除指南](README-delete-vpc.md) - 详细的删除流程和故障排除
+- [按名称删除指南](README-delete-by-name.md) - 通过VPC名称删除
+- [CloudFormation删除指南](README-delete-cloudformation.md) - 使用CloudFormation堆栈删除
+- [按所有者删除指南](README-delete-by-owner.md) - 批量删除多个VPC
+- [快速删除指南](QUICK-DELETE.md) - 简化的删除命令 

@@ -174,4 +174,41 @@ aws ec2 delete-route-table --route-table-id rtb-0123456789abcdef0
 3. **检查依赖** - 确保没有其他服务依赖此VPC
 4. **监控成本** - 删除后检查AWS账单确认成本变化
 
+## 🔄 其他删除选项
+
+除了这个脚本，我们还提供了其他删除选项：
+
+### 1. CloudFormation专用删除脚本
+```bash
+# 使用CloudFormation堆栈名称删除
+./delete-vpc-cloudformation.sh --stack-name my-cluster-vpc-1750419818
+
+# 使用集群名称查找并删除
+./delete-vpc-cloudformation.sh --cluster-name my-cluster
+```
+
+### 2. 按AWS账户所有者删除
+```bash
+# 删除指定AWS账户中的所有VPC堆栈
+./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern vpc
+
+# 删除特定集群的VPC堆栈
+./delete-vpc-by-owner.sh --owner-id 123456789012 --filter-pattern my-cluster
+```
+
+### 3. 完整删除脚本（需要vpc-output目录）
+```bash
+# 使用完整的删除脚本
+./delete-vpc.sh --cluster-name my-cluster
+```
+
+## 📋 脚本选择指南
+
+| 场景 | 推荐脚本 | 说明 |
+|------|----------|------|
+| 丢失vpc-output目录 | `delete-vpc-by-name.sh` | 只需要VPC名称 |
+| 知道CloudFormation堆栈名 | `delete-vpc-cloudformation.sh` | 直接删除堆栈 |
+| 批量删除多个VPC | `delete-vpc-by-owner.sh` | 按账户和模式过滤 |
+| 有完整输出目录 | `delete-vpc.sh` | 最完整的删除流程 |
+
 这个脚本特别适用于您丢失了 `vpc-output` 目录但仍然需要删除VPC的情况。 
