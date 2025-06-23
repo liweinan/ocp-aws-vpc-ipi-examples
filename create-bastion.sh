@@ -73,8 +73,22 @@ create_ssh_key_pair() {
     
     # Check if key already exists
     if $AWS_CMD ec2 describe-key-pairs --key-names "$key_name" --region "$region" &> /dev/null; then
-        echo "⚠️  SSH key pair '$key_name' already exists"
-        return 0
+        echo "❌ Error: SSH key pair '$key_name' already exists in AWS"
+        echo ""
+        echo "This prevents the script from creating a usable bastion host because:"
+        echo "1. The private key (.pem file) cannot be downloaded again from AWS"
+        echo "2. Without the private key, you cannot SSH to the bastion host"
+        echo ""
+        echo "To fix this, you have two options:"
+        echo ""
+        echo "Option 1: Delete the existing key pair from AWS"
+        echo "   $AWS_CMD ec2 delete-key-pair --key-name '$key_name' --region '$region'"
+        echo ""
+        echo "Option 2: Use a different key name"
+        echo "   ./create-bastion.sh --cluster-name $CLUSTER_NAME --ssh-key-name '${key_name}-new'"
+        echo ""
+        echo "After fixing, run this script again."
+        exit 1
     fi
     
     # Create new key pair
@@ -709,10 +723,20 @@ ${ENHANCED_SECURITY:+Enhanced Security Features:
 }
 
 Next Steps:
-1. SSH to the bastion host using the command above
-2. Load the environment: source /home/${SSH_USER}/openshift/env.sh
-3. Copy your OpenShift kubeconfig to the bastion host
-4. Access your OpenShift cluster from the bastion
+1. Set SSH key permissions: chmod 600 ${OUTPUT_DIR}/${SSH_KEY_NAME}.pem
+2. SSH to the bastion host: ssh -i ${OUTPUT_DIR}/${SSH_KEY_NAME}.pem ${SSH_USER}@${BASTION_PUBLIC_IP}
+3. Load the environment: source /home/${SSH_USER}/openshift/env.sh
+4. Copy your OpenShift kubeconfig to the bastion (from your local machine):
+   scp -i ${OUTPUT_DIR}/${SSH_KEY_NAME}.pem openshift-install/auth/kubeconfig ${SSH_USER}@${BASTION_PUBLIC_IP}:~/openshift/
+5. Access your OpenShift cluster from the bastion:
+   export KUBECONFIG=~/openshift/kubeconfig
+   oc get nodes
+   oc get clusteroperators
+
+Useful Commands on Bastion Host:
+- Check cluster status: oc get nodes, oc get clusteroperators, oc get clusterversion
+- Access OpenShift console: oc whoami --show-console
+- Troubleshooting: oc adm node-logs --help, oc get events --all-namespaces
 
 Security Notes:
 - The bastion host is in a public subnet
@@ -732,16 +756,42 @@ echo "🆔 Instance ID: ${INSTANCE_ID}"
 echo "🌐 Public IP: ${BASTION_PUBLIC_IP}"
 echo "🔑 SSH Key: ${OUTPUT_DIR}/${SSH_KEY_NAME}.pem"
 echo ""
-echo "🔗 To connect to the bastion host:"
+echo "🔗 CONNECTING TO THE BASTION HOST"
+echo "================================="
+echo ""
+echo "📋 Step 1: Set proper permissions on SSH key"
+echo "chmod 600 ${OUTPUT_DIR}/${SSH_KEY_NAME}.pem"
+echo ""
+echo "📋 Step 2: SSH to the bastion host"
 echo "ssh -i ${OUTPUT_DIR}/${SSH_KEY_NAME}.pem ${SSH_USER}@${BASTION_PUBLIC_IP}"
+echo ""
+echo "📋 Step 3: Once connected, load the OpenShift environment"
+echo "source /home/${SSH_USER}/openshift/env.sh"
+echo ""
+echo "📋 Step 4: Copy your OpenShift kubeconfig to the bastion (from your local machine)"
+echo "scp -i ${OUTPUT_DIR}/${SSH_KEY_NAME}.pem openshift-install/auth/kubeconfig ${SSH_USER}@${BASTION_PUBLIC_IP}:~/openshift/"
+echo ""
+echo "📋 Step 5: Access your OpenShift cluster from the bastion"
+echo "export KUBECONFIG=~/openshift/kubeconfig"
+echo "oc get nodes"
+echo "oc get clusteroperators"
+echo ""
+echo "🔧 USEFUL COMMANDS ON THE BASTION HOST"
+echo "======================================"
+echo ""
+echo "📊 Check cluster status:"
+echo "oc get nodes"
+echo "oc get clusteroperators"
+echo "oc get clusterversion"
+echo ""
+echo "🌐 Access OpenShift console:"
+echo "oc whoami --show-console"
+echo ""
+echo "🔍 Troubleshooting:"
+echo "oc adm node-logs --help"
+echo "oc get events --all-namespaces"
 echo ""
 echo "📋 Summary saved to: ${OUTPUT_DIR}/bastion-summary.txt"
 echo ""
-echo "🔧 Next Steps:"
-echo "1. SSH to the bastion host"
-echo "2. Load environment: source /home/${SSH_USER}/openshift/env.sh"
-echo "3. Copy your OpenShift kubeconfig to the bastion"
-echo "4. Access your OpenShift cluster"
-echo ""
-echo "To terminate the bastion host:"
+echo "🛑 To terminate the bastion host:"
 echo "$AWS_CMD ec2 terminate-instances --instance-ids ${INSTANCE_ID} --region ${REGION}" 

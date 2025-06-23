@@ -16,6 +16,9 @@ chmod +x create-bastion.sh
   --cluster-name production-cluster \
   --instance-type t3.small \
   --openshift-version 4.15.0
+
+# Connect to bastion host (after creation)
+./connect-bastion.sh --copy-kubeconfig --setup-environment
 ```
 
 ## 📋 Features
@@ -114,29 +117,110 @@ ssh -i ./bastion-output/my-cluster-bastion-key.pem ec2-user@<bastion-public-ip>
 cd /home/ec2-user/openshift
 ```
 
-## 🛠️ Bastion Host Usage
+## 🚀 Detailed Connection Guide
 
-### 1. Initial Access
+### Step 1: Set SSH Key Permissions
 ```bash
-# Copy install-config.yaml to bastion
+# Set proper permissions on the SSH key (required for SSH)
+chmod 600 ./bastion-output/my-cluster-bastion-key.pem
+```
+
+### Step 2: Connect to Bastion Host
+```bash
+# SSH to the bastion host
+ssh -i ./bastion-output/my-cluster-bastion-key.pem ec2-user@<bastion-public-ip>
+```
+
+### Step 3: Load OpenShift Environment
+```bash
+# Once connected to the bastion host, load the environment
+source /home/ec2-user/openshift/env.sh
+```
+
+### Step 4: Copy OpenShift Configuration
+```bash
+# From your local machine, copy the kubeconfig to the bastion
 scp -i ./bastion-output/my-cluster-bastion-key.pem \
-  install-config.yaml \
+  openshift-install/auth/kubeconfig \
   ec2-user@<bastion-public-ip>:~/openshift/
 ```
 
-### 2. Cluster Installation
+### Step 5: Access Your OpenShift Cluster
 ```bash
-# On bastion host
-cd ~/openshift
-openshift-install create cluster --dir=./
+# On the bastion host, set up cluster access
+export KUBECONFIG=~/openshift/kubeconfig
+
+# Verify connection
+oc get nodes
+oc get clusteroperators
 ```
 
-### 3. Cluster Management
+## 🛠️ Bastion Host Usage
+
+### Initial Setup
 ```bash
-# On bastion host
-export KUBECONFIG=~/openshift/auth/kubeconfig
+# 1. Connect to bastion host
+ssh -i ./bastion-output/my-cluster-bastion-key.pem ec2-user@<bastion-public-ip>
+
+# 2. Load environment
+source /home/ec2-user/openshift/env.sh
+
+# 3. Check available tools
+which oc
+which kubectl
+which openshift-install
+which aws
+
+# 4. View welcome message
+cat /home/ec2-user/welcome.txt
+```
+
+### Cluster Management Commands
+```bash
+# Check cluster status
 oc get nodes
-oc get co
+oc get clusteroperators
+oc get clusterversion
+
+# View cluster information
+oc cluster-info
+oc whoami --show-console
+
+# List projects and resources
+oc get projects
+oc get pods --all-namespaces
+
+# Check AWS resources
+aws ec2 describe-instances --filters "Name=tag:kubernetes.io/cluster/*,Values=owned"
+```
+
+### Troubleshooting Commands
+```bash
+# Check cluster events
+oc get events --all-namespaces
+
+# View node logs
+oc adm node-logs --help
+oc adm node-logs <node-name>
+
+# Check cluster operators
+oc get clusteroperators -o yaml
+
+# Monitor cluster health
+oc get clusterversion -o yaml
+```
+
+### File Transfer
+```bash
+# Copy files from local machine to bastion
+scp -i ./bastion-output/my-cluster-bastion-key.pem \
+  <local-file> \
+  ec2-user@<bastion-public-ip>:~/openshift/
+
+# Copy files from bastion to local machine
+scp -i ./bastion-output/my-cluster-bastion-key.pem \
+  ec2-user@<bastion-public-ip>:~/openshift/<file> \
+  ./
 ```
 
 ## 🔧 Maintenance
@@ -221,4 +305,24 @@ rm -rf bastion-output
 - [OpenShift Documentation](https://docs.openshift.com/)
 - [AWS EC2 Documentation](https://docs.aws.amazon.com/ec2/)
 - [Amazon Linux 2023](https://docs.aws.amazon.com/linux/al2023/ug/)
-- [RHCOS Documentation](https://docs.openshift.com/container-platform/latest/installing/installing_aws/installing-aws-customizations.html) 
+- [RHCOS Documentation](https://docs.openshift.com/container-platform/latest/installing/installing_aws/installing-aws-customizations.html)
+
+## 🔗 Automated Connection
+
+For easy bastion host connection, use the `connect-bastion.sh` script:
+
+```bash
+# Basic connection
+./connect-bastion.sh
+
+# Connect and copy kubeconfig automatically
+./connect-bastion.sh --copy-kubeconfig
+
+# Connect and setup OpenShift environment
+./connect-bastion.sh --setup-environment
+
+# Full automation
+./connect-bastion.sh --copy-kubeconfig --setup-environment
+```
+
+See [Bastion Connection Guide](README-connect-bastion.md) for detailed usage. 

@@ -34,6 +34,8 @@ This directory contains configuration files and automation scripts for setting u
 | `create-vpc.sh` | Creates production-ready VPC with multi-AZ support | [VPC Creation Guide](README-create-vpc.md) |
 | `deploy-openshift.sh` | Deploys OpenShift cluster using VPC infrastructure | [OpenShift Deployment Guide](README-openshift-deployment.md) |
 | `create-bastion.sh` | Creates bastion host for private cluster access | [Bastion Host Guide](README-bastion.md) |
+| `connect-bastion.sh` | Automates bastion host connection and setup | [Bastion Connection Guide](README-connect-bastion.md) |
+| `delete-cluster.sh` | Safely deletes OpenShift clusters with resource scanning | [Cluster Deletion Guide](README-delete-cluster.md) |
 | `delete-vpc.sh` | Complete VPC deletion with OpenShift cluster | [Complete Deletion Guide](README-delete-vpc.md) |
 | `delete-vpc-by-name.sh` | Delete VPC by name (when output directory is lost) | [Delete by Name Guide](README-delete-by-name.md) |
 | `delete-vpc-cloudformation.sh` | Delete VPC using CloudFormation stack | [CloudFormation Deletion Guide](README-delete-cloudformation.md) |
@@ -52,10 +54,25 @@ For the most common deletion scenarios, see [Quick Delete Guide](QUICK-DELETE.md
 
 | Scenario | Recommended Script | When to Use |
 |----------|-------------------|-------------|
+| Delete OpenShift cluster only | `delete-cluster.sh` | Safe cluster deletion with resource scanning |
 | Complete output directory available | `delete-vpc.sh` | Most comprehensive deletion process |
 | Lost vpc-output directory | `delete-vpc-by-name.sh` | Only need VPC name |
 | Know CloudFormation stack name | `delete-vpc-cloudformation.sh` | Most secure, ensures complete deletion |
 | Batch delete multiple VPCs | `delete-vpc-by-owner.sh` | Bulk operations, high efficiency |
+
+### Complete Cleanup Workflow
+
+```bash
+# 1. Delete OpenShift cluster (recommended first step)
+./delete-cluster.sh --dry-run                    # Preview what will be deleted
+./delete-cluster.sh                              # Delete the cluster
+
+# 2. Delete VPC infrastructure
+./delete-vpc.sh                                  # Delete VPC and remaining resources
+
+# 3. Clean up local files
+./cleanup.sh                                     # Remove local files and directories
+```
 
 ## 🧹 Maintenance Tools
 

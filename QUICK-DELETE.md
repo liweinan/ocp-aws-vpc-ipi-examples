@@ -8,14 +8,29 @@ A simplified deletion guide providing the most commonly used deletion commands.
 
 ## Method 1: Using Deletion Scripts (Recommended)
 
+### Step 1: Delete OpenShift Cluster (Recommended First Step)
+
+```bash
+# 1. Make script executable
+chmod +x delete-cluster.sh
+
+# 2. Preview cluster deletion (strongly recommended first)
+./delete-cluster.sh --dry-run
+
+# 3. Delete the OpenShift cluster
+./delete-cluster.sh
+```
+
+### Step 2: Delete VPC Infrastructure
+
 ```bash
 # 1. Make script executable
 chmod +x delete-vpc.sh
 
-# 2. Preview deletion (strongly recommended first)
+# 2. Preview VPC deletion (strongly recommended first)
 ./delete-vpc.sh --cluster-name my-cluster --dry-run
 
-# 3. Execute deletion
+# 3. Execute VPC deletion
 ./delete-vpc.sh --cluster-name my-cluster
 ```
 
@@ -41,7 +56,10 @@ rm -rf vpc-output bastion-output openshift-install *.pem
 ## Verification
 
 ```bash
-# Check if related resources still exist
+# Check if cluster resources still exist
+./delete-cluster.sh --dry-run
+
+# Check if VPC resources still exist
 aws ec2 describe-instances --filters "Name=tag:kubernetes.io/cluster/my-cluster,Values=owned"
 aws cloudformation describe-stacks --stack-name my-cluster-vpc-*
 ```
@@ -52,9 +70,14 @@ aws cloudformation describe-stacks --stack-name my-cluster-vpc-*
 A: Check error messages, usually dependent resources need to be deleted first.
 
 **Q: Can I skip certain steps?**
-A: Use `--skip-openshift` or `--skip-bastion` parameters.
+A: Use `--skip-openshift` or `--skip-bastion` parameters with delete-vpc.sh.
 
 **Q: How to force deletion?**
 A: Use `--force` parameter to skip confirmation prompts.
 
-For detailed instructions, refer to [Complete Deletion Guide](README-delete-vpc.md). 
+**Q: Should I delete the cluster or VPC first?**
+A: It's recommended to delete the OpenShift cluster first using `delete-cluster.sh`, then delete the VPC infrastructure.
+
+For detailed instructions, refer to:
+- [Cluster Deletion Guide](README-delete-cluster.md)
+- [Complete Deletion Guide](README-delete-vpc.md) 
