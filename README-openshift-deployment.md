@@ -176,21 +176,46 @@ When you run the script, it will guide you through the manual configuration:
 
 #### Key Options:
 
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--vpc-output-dir` | Directory containing VPC output files | `./vpc-output` |
+| `--openshift-version` | OpenShift version to install | `4.18.15` |
+| `--install-dir` | Installation directory | `./openshift-install` |
+| `--publish-strategy` | Publish strategy: External or Internal | `Internal` |
+| `--dry-run` | Generate config only, don't install | `false` |
+
+**Note:** Cluster name, base domain, SSH key, and pull secret are entered manually during the interactive `openshift-install create install-config` process.
+
+#### Usage Examples:
+
 ```bash
---vpc-output-dir           # Directory containing VPC output
---cluster-name             # OpenShift cluster name
---base-domain              # Base domain for the cluster
---openshift-version        # OpenShift version to install
---pull-secret              # Red Hat pull secret
---ssh-key                  # SSH public key
---compute-nodes            # Number of compute nodes (default: 3)
---control-plane-nodes      # Number of control plane nodes (default: 3)
---compute-instance-type    # Compute node instance type
---control-plane-instance-type # Control plane instance type
---publish-strategy         # External or Internal (default: Internal)
---network-type             # OpenShiftSDN or OVNKubernetes
---dry-run                  # Generate config only, don't install
+# Basic deployment with default settings
+./deploy-openshift.sh --dry-run
+
+# Custom OpenShift version and publish strategy
+./deploy-openshift.sh \
+  --openshift-version 4.17.0 \
+  --publish-strategy External \
+  --dry-run
+
+# Custom installation directory
+./deploy-openshift.sh \
+  --install-dir ./my-cluster \
+  --dry-run
+
+# Production deployment (without --dry-run)
+./deploy-openshift.sh \
+  --openshift-version 4.18.15 \
+  --publish-strategy External
 ```
+
+**During the interactive process, you'll be prompted for:**
+- SSH Public Key
+- Platform (select: aws)
+- Region (use the one shown in script output)
+- Base Domain
+- Cluster Name
+- Pull Secret
 
 ### Bastion Host Creation (`create-bastion.sh`)
 
