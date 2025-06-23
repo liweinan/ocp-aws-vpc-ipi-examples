@@ -42,12 +42,57 @@ AWS_PROFILE=static ./deploy-openshift.sh --dry-run
 ```
 
 **重要提示：**
-- **SSH Public Key**: 使用 bastion host 的 SSH 密钥路径
+- **SSH Public Key**: 使用您的个人SSH公钥（用于访问OpenShift集群节点）
 - **Region**: 必须与 VPC 所在区域一致
 - **Base Domain**: 确保您有该域名的 DNS 控制权
 - **Pull Secret**: 从 Red Hat 获取的 pull secret
 
-### 1.4 验证生成的文件
+### 1.4 SSH密钥配置说明
+
+**重要：OpenShift集群和Bastion host使用不同的SSH密钥！**
+
+- **Bastion Host**: 使用 `weli-test-cluster-bastion-key` 密钥对
+- **OpenShift集群节点**: 使用您在配置时指定的SSH公钥（通常是您的个人密钥）
+
+这意味着：
+- ✅ 您可以用bastion密钥连接到bastion host
+- ❌ 但您无法从bastion host连接到OpenShift集群节点（因为节点使用的是您的个人SSH密钥）
+
+**解决方案：将您的SSH私钥复制到Bastion Host**
+
+```bash
+# 从本地机器执行，复制您的SSH私钥到bastion host
+scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ~/.ssh/id_rsa ec2-user@<bastion-public-ip>:~/.ssh/id_rsa
+
+# 复制公钥（可选，用于验证）
+scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ~/.ssh/id_rsa.pub ec2-user@<bastion-public-ip>:~/.ssh/id_rsa.pub
+```
+
+**在bastion host上设置SSH密钥权限：**
+
+```bash
+# 连接到bastion host
+ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>
+
+# 在bastion host上设置SSH密钥权限
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/id_rsa
+chmod 644 ~/.ssh/id_rsa.pub
+
+# 测试连接到集群节点（安装完成后）
+ssh core@<cluster-node-private-ip>
+```
+
+**验证SSH密钥配置：**
+
+```bash
+# 在bastion host上验证可以访问集群节点
+export KUBECONFIG=~/openshift-cluster/auth/kubeconfig
+oc get nodes
+oc debug node/<node-name>
+```
+
+### 1.5 验证生成的文件
 
 脚本完成后，您应该看到：
 
@@ -199,6 +244,56 @@ aws sts get-caller-identity
 - 确保 `credentials` 和 `config` 文件权限为 600
 - 使用 `--profile static` 参数来指定正确的配置文件
 
+### 3.4 配置SSH密钥访问集群节点
+
+**重要：为了能够从bastion host访问OpenShift集群节点，您需要复制您的SSH私钥到bastion host。**
+
+#### 从本地机器复制SSH密钥
+
+```bash
+# 复制您的SSH私钥到bastion host
+scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ~/.ssh/id_rsa ec2-user@<bastion-public-ip>:~/.ssh/id_rsa
+
+# 复制公钥（可选，用于验证）
+scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ~/.ssh/id_rsa.pub ec2-user@<bastion-public-ip>:~/.ssh/id_rsa.pub
+```
+
+#### 在bastion host上设置SSH密钥权限
+
+```bash
+# 连接到bastion host
+ssh -i ./bastion-output/weli-test-cluster-bastion-key.pem ec2-user@<bastion-public-ip>
+
+# 在bastion host上设置SSH密钥权限
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/id_rsa
+chmod 644 ~/.ssh/id_rsa.pub
+
+# 验证SSH密钥配置
+ls -la ~/.ssh/
+```
+
+#### 验证SSH密钥配置
+
+安装完成后，您可以测试SSH连接到集群节点：
+
+```bash
+# 获取集群节点信息
+export KUBECONFIG=~/openshift-cluster/auth/kubeconfig
+oc get nodes -o wide
+
+# 测试SSH连接到集群节点（使用节点内部IP）
+ssh core@<cluster-node-private-ip>
+
+# 或者使用oc debug命令访问节点
+oc debug node/<node-name>
+```
+
+**注意：**
+- Bastion host使用 `weli-test-cluster-bastion-key` 密钥对
+- OpenShift集群节点使用您的个人SSH密钥
+- 复制私钥后，您就可以从bastion host完全访问集群节点了
+
 ## 步骤 4: 执行集群安装
 
 ### 4.1 准备安装目录
@@ -347,6 +442,39 @@ oc get nodes
    chmod +x openshift-install
    ```
 
+5. **SSH密钥访问问题**
+   ```bash
+   # 检查SSH密钥权限
+   ls -la ~/.ssh/
+   
+   # 确保私钥权限正确
+   chmod 600 ~/.ssh/id_rsa
+   chmod 644 ~/.ssh/id_rsa.pub
+   
+   # 测试SSH连接到集群节点
+   ssh -i ~/.ssh/id_rsa core@<cluster-node-ip>
+   
+   # 如果无法连接，检查节点安全组是否允许SSH
+   aws ec2 describe-security-groups --filters "Name=tag:kubernetes.io/cluster/weli-test-cluster,Values=owned"
+   ```
+
+6. **无法从bastion host访问集群节点**
+   ```bash
+   # 检查是否复制了正确的SSH私钥
+   ls -la ~/.ssh/id_rsa
+   
+   # 重新复制SSH私钥（从本地机器执行）
+   scp -i ./bastion-output/weli-test-cluster-bastion-key.pem ~/.ssh/id_rsa ec2-user@<bastion-public-ip>:~/.ssh/id_rsa
+   
+   # 在bastion host上设置权限
+   chmod 600 ~/.ssh/id_rsa
+   
+   # 验证集群节点访问
+   export KUBECONFIG=~/openshift-cluster/auth/kubeconfig
+   oc get nodes -o wide
+   ssh core@<node-internal-ip>
+   ```
+
 ### 重新开始安装
 
 如果安装失败需要重新开始：
@@ -383,9 +511,15 @@ cd ~/openshift-cluster
 1. **本地生成配置**: 使用 `deploy-openshift.sh --dry-run` 生成 `install-config.yaml`
 2. **上传到 Bastion**: 将配置文件上传到 bastion host
 3. **准备环境**: 在 bastion host 上下载安装程序并配置 AWS 凭证
-4. **创建安装目录**: 使用 `~/openshift-cluster` 作为专用安装目录
-5. **执行安装**: 使用 `openshift-install create cluster` 开始安装
-6. **监控进度**: 使用详细日志模式监控安装过程
-7. **访问集群**: 通过 kubeconfig 或 Web 控制台访问集群
+4. **配置SSH密钥**: 复制您的SSH私钥到bastion host以访问集群节点
+5. **创建安装目录**: 使用 `~/openshift-cluster` 作为专用安装目录
+6. **执行安装**: 使用 `openshift-install create cluster` 开始安装
+7. **监控进度**: 使用详细日志模式监控安装过程
+8. **访问集群**: 通过 kubeconfig 或 Web 控制台访问集群
 
 这个流程确保了私有集群能够正确安装，并且您可以从 bastion host 访问集群的所有功能。
+
+**重要提醒：**
+- Bastion host和OpenShift集群使用不同的SSH密钥
+- 必须将您的个人SSH私钥复制到bastion host才能访问集群节点
+- 确保SSH密钥权限设置正确（私钥600，公钥644）
