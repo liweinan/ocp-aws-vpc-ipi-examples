@@ -83,3 +83,9 @@ metadata.json
 # Cache directories
 .cache/
 *.cache
+
+# Backup script
+backup.sh
+
+# Backup directories
+backups/
