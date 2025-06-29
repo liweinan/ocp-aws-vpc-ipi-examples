@@ -103,7 +103,7 @@ sudo dnf install -y httpd-tools
 
 # Create authentication
 echo "🔐 Creating registry authentication..."
-htpasswd -Bc $registry_storage/auth/htpasswd $registry_user <<< "$registry_password"
+htpasswd -bBc $registry_storage/auth/htpasswd $registry_user "$registry_password"
 
 # Create self-signed certificate
 echo "🔒 Creating self-signed certificate..."
