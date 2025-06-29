@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Image Synchronization Script for Disconnected OpenShift Cluster
-# Syncs OpenShift images from external registry to private mirror registry
+# Syncs essential OpenShift images from external registry to private mirror registry on bastion host
 
 set -euo pipefail
 
@@ -12,8 +12,8 @@ DEFAULT_OPENSHIFT_VERSION="4.18.15"
 DEFAULT_REGISTRY_PORT="5000"
 DEFAULT_REGISTRY_USER="admin"
 DEFAULT_REGISTRY_PASSWORD="admin123"
-DEFAULT_SYNC_DIR="./sync-output"
 DEFAULT_DRY_RUN="no"
+DEFAULT_BASTION_KEY="~/.ssh/id_rsa"
 
 # Function to display usage
 usage() {
@@ -25,8 +25,8 @@ usage() {
     echo "  --registry-port       Registry port (default: $DEFAULT_REGISTRY_PORT)"
     echo "  --registry-user       Registry username (default: $DEFAULT_REGISTRY_USER)"
     echo "  --registry-password   Registry password (default: $DEFAULT_REGISTRY_PASSWORD)"
-    echo "  --sync-dir            Sync output directory (default: $DEFAULT_SYNC_DIR)"
     echo "  --dry-run             Show what would be synced without actually syncing"
+    echo "  --bastion-key         SSH private key for bastion host (default: $DEFAULT_BASTION_KEY)"
     echo "  --help                Display this help message"
     echo ""
     echo "Examples:"
@@ -39,7 +39,7 @@ usage() {
 check_prerequisites() {
     local missing_tools=()
     
-    for tool in oc podman jq yq; do
+    for tool in ssh scp jq; do
         if ! command -v "$tool" &> /dev/null; then
             missing_tools+=("$tool")
         fi
@@ -48,17 +48,6 @@ check_prerequisites() {
     if [[ ${#missing_tools[@]} -gt 0 ]]; then
         echo "❌ Missing required tools: ${missing_tools[*]}"
         echo "Please install the missing tools and try again"
-        echo ""
-        echo "Installation commands:"
-        echo "  # Install OpenShift CLI"
-        echo "  curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/latest/openshift-client-linux.tar.gz | tar xz"
-        echo "  sudo mv oc kubectl /usr/local/bin/"
-        echo ""
-        echo "  # Install Podman"
-        echo "  sudo dnf install -y podman"
-        echo ""
-        echo "  # Install jq and yq"
-        echo "  sudo dnf install -y jq yq"
         exit 1
     fi
     
@@ -75,419 +64,212 @@ check_infrastructure() {
         exit 1
     fi
     
+    if [[ ! -f "$infra_dir/bastion-instance-id" ]]; then
+        echo "❌ Bastion instance ID not found"
+        echo "Please run 01-create-infrastructure.sh first"
+        exit 1
+    fi
+    
     echo "✅ Infrastructure files found"
 }
 
-# Function to test registry access
-test_registry_access() {
-    local cluster_name="$1"
-    local registry_port="$2"
-    local registry_user="$3"
-    local registry_password="$4"
+# Function to get bastion connection info
+get_bastion_info() {
+    local infra_dir="$1"
     
-    echo "🧪 Testing registry access..."
+    BASTION_IP=$(cat "$infra_dir/bastion-public-ip")
+    BASTION_INSTANCE_ID=$(cat "$infra_dir/bastion-instance-id")
     
-    # Test HTTPS access
-    if curl -k -u "$registry_user:$registry_password" "https://registry.$cluster_name.local:$registry_port/v2/_catalog" >/dev/null 2>&1; then
-        echo "✅ Registry HTTPS access working"
-    else
-        echo "❌ Registry HTTPS access failed"
+    echo "📡 Bastion Host: $BASTION_IP"
+    echo "🆔 Instance ID: $BASTION_INSTANCE_ID"
+}
+
+# Function to test bastion connectivity
+test_bastion_connectivity() {
+    local bastion_ip="$1"
+    local bastion_key="$2"
+    
+    echo "🧪 Testing bastion host connectivity..."
+    
+    if ! ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -i "$bastion_key" ubuntu@"$bastion_ip" "echo 'Connection successful'" >/dev/null 2>&1; then
+        echo "❌ Cannot connect to bastion host"
         echo "   Please ensure:"
-        echo "   1. Registry is running on bastion host"
-        echo "   2. Hosts entry is added: $(cat $DEFAULT_INFRA_OUTPUT_DIR/bastion-public-ip) registry.$cluster_name.local"
-        echo "   3. Registry credentials are correct"
+        echo "   1. Bastion host is running"
+        echo "   2. SSH key is properly configured"
+        echo "   3. Security groups allow SSH access"
+        echo "   4. You can connect manually: ssh -i $bastion_key ubuntu@$bastion_ip"
         return 1
     fi
     
-    # Test Docker/Podman login
-    if podman login --username "$registry_user" --password "$registry_password" --tls-verify=false "registry.$cluster_name.local:$registry_port" >/dev/null 2>&1; then
-        echo "✅ Registry Docker/Podman access working"
-    else
-        echo "❌ Registry Docker/Podman access failed"
-        return 1
-    fi
+    echo "✅ Bastion host connectivity confirmed"
 }
 
-# Function to download OpenShift installer
-download_openshift_installer() {
-    local openshift_version="$1"
-    local sync_dir="$2"
-    
-    echo "📥 Downloading OpenShift installer version $openshift_version..."
-    
-    mkdir -p "$sync_dir"
-    cd "$sync_dir"
-    
-    # Download installer
-    if [[ ! -f "openshift-install" ]]; then
-        echo "   Downloading openshift-install..."
-        wget -q "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/$openshift_version/openshift-install-linux.tar.gz"
-        tar xzf openshift-install-linux.tar.gz
-        chmod +x openshift-install
-        rm openshift-install-linux.tar.gz
-    else
-        echo "   OpenShift installer already exists"
-    fi
-    
-    # Download oc client
-    if [[ ! -f "oc" ]]; then
-        echo "   Downloading oc client..."
-        wget -q "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/$openshift_version/openshift-client-linux.tar.gz"
-        tar xzf openshift-client-linux.tar.gz
-        chmod +x oc kubectl
-        rm openshift-client-linux.tar.gz
-    else
-        echo "   OpenShift client already exists"
-    fi
-    
-    cd - > /dev/null
-    
-    echo "✅ OpenShift tools downloaded"
-}
-
-# Function to create mirror configuration
-create_mirror_config() {
-    local openshift_version="$1"
-    local cluster_name="$2"
-    local registry_port="$3"
-    local sync_dir="$4"
-    
-    echo "📝 Creating mirror configuration..."
-    
-    cd "$sync_dir"
-    
-    # Create imageset-config.yaml
-    cat > imageset-config.yaml <<EOF
-apiVersion: mirror.openshift.io/v1alpha2
-kind: ImageSetConfiguration
-metadata:
-  name: openshift-$openshift_version
-mirror:
-  platform:
-    channels:
-    - name: stable-$openshift_version
-      type: ocp
-  additionalImages:
-  - name: registry.redhat.io/ubi8/ubi:latest
-  - name: registry.redhat.io/ubi8/ubi-minimal:latest
-  - name: registry.redhat.io/ubi9/ubi:latest
-  - name: registry.redhat.io/ubi9/ubi-minimal:latest
-  operators:
-  - catalog: registry.redhat.io/redhat/redhat-operator-index:v$openshift_version
-    packages:
-    - name: advanced-cluster-management
-    - name: multicluster-engine
-    - name: local-storage-operator
-    - name: openshift-gitops-operator
-    - name: openshift-pipelines-operator-rh
-    - name: quay-operator
-    - name: red-hat-camel-k
-    - name: red-hat-openstack
-    - name: red-hat-codeready-workspaces
-    - name: eclipse-che
-    - name: amq-streams
-    - name: amq7-interconnect-operator
-    - name: apicurio-registry
-    - name: 3scale-operator
-    - name: apicurito
-    - name: fuse
-    - name: jboss-datagrid-8-operator
-    - name: jboss-datavirt-8-operator
-    - name: jboss-eap-8-operator
-    - name: jboss-fuse-8-operator
-    - name: jboss-webserver-5-operator
-    - name: jboss-amq-7-operator
-    - name: cluster-logging
-    - name: elasticsearch-operator
-    - name: jaeger-product
-    - name: kiali-ossm
-    - name: servicemeshoperator
-    - name: grafana-operator
-    - name: prometheus
-    - name: node-problem-detector
-    - name: nfd
-    - name: ptp-operator
-    - name: sriov-network-operator
-    - name: cluster-baremetal-operator
-    - name: metallb-operator
-    - name: bare-metal-event-relay
-    - name: lvms-operator
-    - name: ocs-operator
-    - name: odf-operator
-    - name: odf-lvm-operator
-    - name: odf-multicluster-orchestrator
-    - name: odf-operator-ibm
-    - name: mcg-operator
-    - name: noobaa-operator
-    - name: openshift-container-storage
-    - name: container-security-operator
-    - name: compliance-operator
-    - name: gatekeeper-operator
-    - name: oauth-proxy
-    - name: cert-manager
-    - name: cluster-autoscaler
-    - name: cluster-logging
-    - name: elasticsearch-operator
-    - name: file-integrity-operator
-    - name: insights-operator
-    - name: local-storage-operator
-    - name: machine-api-operator
-    - name: marketplace-operator
-    - name: node-tuning-operator
-    - name: openshift-apiserver
-    - name: openshift-controller-manager
-    - name: openshift-samples
-    - name: operator-lifecycle-manager
-    - name: operator-lifecycle-manager-catalog
-    - name: operator-lifecycle-manager-packageserver
-    - name: service-ca-operator
-    - name: special-resource-operator
-    - name: windows-machine-config-operator
-  - catalog: registry.redhat.io/redhat/certified-operator-index:v$openshift_version
-    packages:
-    - name: isv-operator
-    - name: mongodb-enterprise
-    - name: postgresql
-    - name: redis-enterprise
-    - name: vault
-    - name: etcd
-    - name: cockroachdb
-    - name: cass-operator
-    - name: crunchy-postgresql-operator
-    - name: influxdb-operator
-    - name: mariadb-enterprise
-    - name: mysql-enterprise
-    - name: nginx-ingress-operator
-    - name: hazelcast-enterprise
-    - name: rabbitmq-cluster-operator
-    - name: redis-enterprise-operator
-    - name: scylladb
-    - name: solr-operator
-    - name: spark-operator
-    - name: strimzi-kafka-operator
-    - name: tensorflow-operator
-    - name: tensorflow-serving
-    - name: kubeflow
-    - name: argo
-    - name: tektoncd-operator
-    - name: gitlab-operator-kubernetes
-    - name: gitlab-runner-operator
-    - name: jenkins-operator
-    - name: jfrog-artifactory-oss-operator
-    - name: nexus-operator
-    - name: sonarqube-operator
-    - name: grafana-operator
-    - name: prometheus-operator
-    - name: elasticsearch-operator
-    - name: fluentd-operator
-    - name: jaeger-operator
-    - name: kiali-operator
-    - name: istio-operator
-    - name: linkerd-operator
-    - name: contour-operator
-    - name: traefik-operator
-    - name: nginx-ingress-operator
-    - name: haproxy-ingress-operator
-    - name: cert-manager
-    - name: external-dns-operator
-    - name: cluster-autoscaler
-    - name: descheduler-operator
-    - name: kubevirt-hyperconverged
-    - name: node-problem-detector
-    - name: nfd-operator
-    - name: ptp-operator
-    - name: sriov-network-operator
-    - name: cluster-baremetal-operator
-    - name: metallb-operator
-    - name: bare-metal-event-relay
-    - name: lvms-operator
-    - name: ocs-operator
-    - name: odf-operator
-    - name: odf-lvm-operator
-    - name: odf-multicluster-orchestrator
-    - name: odf-operator-ibm
-    - name: mcg-operator
-    - name: noobaa-operator
-    - name: openshift-container-storage
-    - name: container-security-operator
-    - name: compliance-operator
-    - name: gatekeeper-operator
-    - name: oauth-proxy
-    - name: cert-manager
-    - name: cluster-autoscaler
-    - name: cluster-logging
-    - name: elasticsearch-operator
-    - name: file-integrity-operator
-    - name: insights-operator
-    - name: local-storage-operator
-    - name: machine-api-operator
-    - name: marketplace-operator
-    - name: node-tuning-operator
-    - name: openshift-apiserver
-    - name: openshift-controller-manager
-    - name: openshift-samples
-    - name: operator-lifecycle-manager
-    - name: operator-lifecycle-manager-catalog
-    - name: operator-lifecycle-manager-packageserver
-    - name: service-ca-operator
-    - name: special-resource-operator
-    - name: windows-machine-config-operator
-  - catalog: registry.redhat.io/redhat/community-operator-index:v$openshift_version
-    packages:
-    - name: prometheus-operator
-    - name: grafana-operator
-    - name: elasticsearch-operator
-    - name: fluentd-operator
-    - name: jaeger-operator
-    - name: kiali-operator
-    - name: istio-operator
-    - name: linkerd-operator
-    - name: contour-operator
-    - name: traefik-operator
-    - name: nginx-ingress-operator
-    - name: haproxy-ingress-operator
-    - name: cert-manager
-    - name: external-dns-operator
-    - name: cluster-autoscaler
-    - name: descheduler-operator
-    - name: kubevirt-hyperconverged
-    - name: node-problem-detector
-    - name: nfd-operator
-    - name: ptp-operator
-    - name: sriov-network-operator
-    - name: cluster-baremetal-operator
-    - name: metallb-operator
-    - name: bare-metal-event-relay
-    - name: lvms-operator
-    - name: ocs-operator
-    - name: odf-operator
-    - name: odf-lvm-operator
-    - name: odf-multicluster-orchestrator
-    - name: odf-operator-ibm
-    - name: mcg-operator
-    - name: noobaa-operator
-    - name: openshift-container-storage
-    - name: container-security-operator
-    - name: compliance-operator
-    - name: gatekeeper-operator
-    - name: oauth-proxy
-    - name: cert-manager
-    - name: cluster-autoscaler
-    - name: cluster-logging
-    - name: elasticsearch-operator
-    - name: file-integrity-operator
-    - name: insights-operator
-    - name: local-storage-operator
-    - name: machine-api-operator
-    - name: marketplace-operator
-    - name: node-tuning-operator
-    - name: openshift-apiserver
-    - name: openshift-controller-manager
-    - name: openshift-samples
-    - name: operator-lifecycle-manager
-    - name: operator-lifecycle-manager-catalog
-    - name: operator-lifecycle-manager-packageserver
-    - name: service-ca-operator
-    - name: special-resource-operator
-    - name: windows-machine-config-operator
-storageConfig:
-  local:
-    path: ./mirror
-EOF
-    
-    # Create mirror-to-registry.sh script
-    cat > mirror-to-registry.sh <<EOF
-#!/bin/bash
-# Mirror OpenShift images to private registry
-
-set -euo pipefail
-
-REGISTRY_URL="registry.$cluster_name.local:$registry_port"
-REGISTRY_USER="$DEFAULT_REGISTRY_USER"
-REGISTRY_PASSWORD="$DEFAULT_REGISTRY_PASSWORD"
-
-echo "🚀 Starting image mirroring to $REGISTRY_URL"
-echo "============================================="
-echo ""
-
-# Login to registry
-echo "🔐 Logging into registry..."
-podman login --username "\$REGISTRY_USER" --password "\$REGISTRY_PASSWORD" --tls-verify=false "\$REGISTRY_URL"
-
-# Create mirror
-echo "📦 Creating mirror..."
-./oc adm release mirror \\
-    --from=quay.io/openshift-release-dev/ocp-release:$openshift_version-x86_64 \\
-    --to-dir=./mirror \\
-    --to=\$REGISTRY_URL/openshift/release
-
-echo ""
-echo "✅ Mirror creation completed!"
-echo ""
-echo "📁 Mirror files created in: ./mirror"
-echo "🔗 Registry URL: \$REGISTRY_URL"
-echo ""
-echo "📝 Next steps:"
-echo "1. Copy mirror files to disconnected environment"
-echo "2. Run: ./oc adm release mirror --from-dir=./mirror --to=\$REGISTRY_URL/openshift/release"
-echo "3. Use the generated install-config.yaml for cluster installation"
-EOF
-    
-    chmod +x mirror-to-registry.sh
-    
-    cd - > /dev/null
-    
-    echo "✅ Mirror configuration created"
-}
-
-# Function to perform image mirroring
-perform_mirroring() {
+# Function to create sync script for bastion
+create_bastion_sync_script() {
     local openshift_version="$1"
     local cluster_name="$2"
     local registry_port="$3"
     local registry_user="$4"
     local registry_password="$5"
-    local sync_dir="$6"
     
-    echo "🔄 Starting image mirroring process..."
-    echo "   This process may take 30-60 minutes depending on your internet connection"
-    echo "   and the number of images being mirrored."
-    echo ""
+    echo "📝 Creating sync script for bastion host..."
     
-    cd "$sync_dir"
-    
-    # Login to registry
-    echo "🔐 Logging into registry..."
-    ./oc registry login --registry="registry.$cluster_name.local:$registry_port" --auth-basic="$registry_user:$registry_password" --insecure
-    
-    # Create mirror
-    echo "📦 Creating mirror..."
-    echo "   This will download all required OpenShift images..."
-    echo ""
-    
-    ./oc adm release mirror \
-        --from=quay.io/openshift-release-dev/ocp-release:$openshift_version-x86_64 \
-        --to-dir=./mirror \
-        --to=registry.$cluster_name.local:$registry_port/openshift/release \
-        --insecure
-    
-    cd - > /dev/null
-    
-    echo "✅ Image mirroring completed!"
-}
+    cat > /tmp/sync-images-on-bastion.sh <<'EOF'
+#!/bin/bash
 
-# Function to create install-config template
-create_install_config_template() {
-    local cluster_name="$1"
-    local registry_port="$2"
-    local sync_dir="$3"
+# Image sync script to run on bastion host
+set -euo pipefail
+
+OPENSHIFT_VERSION="$1"
+CLUSTER_NAME="$2"
+REGISTRY_PORT="$3"
+REGISTRY_USER="$4"
+REGISTRY_PASSWORD="$5"
+REGISTRY_URL="registry.${CLUSTER_NAME}.local:${REGISTRY_PORT}"
+
+echo "🔄 Starting image synchronization on bastion host..."
+echo "=================================================="
+echo ""
+echo "📋 Configuration:"
+echo "   OpenShift Version: ${OPENSHIFT_VERSION}"
+echo "   Registry URL: ${REGISTRY_URL}"
+echo "   Registry User: ${REGISTRY_USER}"
+echo ""
+
+# Create sync directory
+SYNC_DIR="/home/ubuntu/openshift-sync"
+mkdir -p "${SYNC_DIR}"
+cd "${SYNC_DIR}"
+
+# Install required tools if not present
+echo "🔧 Installing required tools..."
+if ! command -v oc &> /dev/null; then
+    echo "   Installing OpenShift CLI..."
+    curl -L "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${OPENSHIFT_VERSION}/openshift-client-linux.tar.gz" | tar xz
+    sudo mv oc kubectl /usr/local/bin/
+fi
+
+if ! command -v podman &> /dev/null; then
+    echo "   Installing Podman..."
+    sudo dnf install -y podman
+fi
+
+# Test registry access
+echo "🧪 Testing registry access..."
+if ! curl -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "http://localhost:${REGISTRY_PORT}/v2/_catalog" >/dev/null 2>&1; then
+    echo "❌ Cannot access registry"
+    echo "   Please ensure registry is running and accessible"
+    exit 1
+fi
+
+# Login to registry
+echo "🔐 Logging into registry..."
+podman login --username "${REGISTRY_USER}" --password "${REGISTRY_PASSWORD}" --tls-verify=false "localhost:${REGISTRY_PORT}"
+
+# Create mirror directory
+echo "📁 Creating mirror directory..."
+mkdir -p mirror
+
+# Sync OpenShift release images (core installation images)
+echo "📦 Syncing OpenShift ${OPENSHIFT_VERSION} release images..."
+echo "   This may take 20-40 minutes depending on your internet connection..."
+echo ""
+
+oc adm release mirror \
+    --from=quay.io/openshift-release-dev/ocp-release:${OPENSHIFT_VERSION}-x86_64 \
+    --to-dir=./mirror \
+    --to=${REGISTRY_URL}/openshift/release \
+    --insecure
+
+# Sync essential additional images
+echo "📦 Syncing essential additional images..."
+
+# Sync UBI images (commonly used base images)
+echo "   Syncing UBI base images..."
+oc image mirror \
+    registry.redhat.io/ubi8/ubi:latest \
+    ${REGISTRY_URL}/ubi8/ubi:latest \
+    --insecure
+
+oc image mirror \
+    registry.redhat.io/ubi8/ubi-minimal:latest \
+    ${REGISTRY_URL}/ubi8/ubi-minimal:latest \
+    --insecure
+
+oc image mirror \
+    registry.redhat.io/ubi9/ubi:latest \
+    ${REGISTRY_URL}/ubi9/ubi:latest \
+    --insecure
+
+oc image mirror \
+    registry.redhat.io/ubi9/ubi-minimal:latest \
+    ${REGISTRY_URL}/ubi9/ubi-minimal:latest \
+    --insecure
+
+# Sync essential operators (only the most commonly used ones)
+echo "   Syncing essential operators..."
+
+# Red Hat Operators - Core ones only
+oc image mirror \
+    registry.redhat.io/redhat/redhat-operator-index:v${OPENSHIFT_VERSION} \
+    ${REGISTRY_URL}/redhat/redhat-operator-index:v${OPENSHIFT_VERSION} \
+    --insecure
+
+# Certified Operators - Core ones only  
+oc image mirror \
+    registry.redhat.io/redhat/certified-operator-index:v${OPENSHIFT_VERSION} \
+    ${REGISTRY_URL}/redhat/certified-operator-index:v${OPENSHIFT_VERSION} \
+    --insecure
+
+# Community Operators - Core ones only
+oc image mirror \
+    registry.redhat.io/redhat/community-operator-index:v${OPENSHIFT_VERSION} \
+    ${REGISTRY_URL}/redhat/community-operator-index:v${OPENSHIFT_VERSION} \
+    --insecure
+
+# Create imageContentSources configuration
+echo "📝 Creating imageContentSources configuration..."
+cat > imageContentSources.yaml <<'IMAGECONTENTEOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: image-content-sources
+  namespace: openshift-config
+data:
+  registries.conf: |
+    unqualified-search-registries = ["registry.${CLUSTER_NAME}.local:${REGISTRY_PORT}"]
     
-    echo "📝 Creating install-config template..."
+    [[registry]]
+      prefix = ""
+      location = "quay.io/openshift-release-dev/ocp-release"
+      mirror-by-digest-only = true
+      mirrors = ["registry.${CLUSTER_NAME}.local:${REGISTRY_PORT}/openshift/release"]
     
-    cd "$sync_dir"
+    [[registry]]
+      prefix = ""
+      location = "quay.io/openshift-release-dev/ocp-v4.0-art-dev"
+      mirror-by-digest-only = true
+      mirrors = ["registry.${CLUSTER_NAME}.local:${REGISTRY_PORT}/openshift/release"]
     
-    # Create install-config template
-    cat > install-config-template.yaml <<EOF
+    [[registry]]
+      prefix = ""
+      location = "registry.redhat.io/ubi8"
+      mirrors = ["registry.${CLUSTER_NAME}.local:${REGISTRY_PORT}/ubi8"]
+    
+    [[registry]]
+      prefix = ""
+      location = "registry.redhat.io/ubi9"
+      mirrors = ["registry.${CLUSTER_NAME}.local:${REGISTRY_PORT}/ubi9"]
+    
+    [[registry]]
+      prefix = ""
+      location = "registry.redhat.io/redhat"
+      mirrors = ["registry.${CLUSTER_NAME}.local:${REGISTRY_PORT}/redhat"]
+IMAGECONTENTEOF
+
+# Create install-config template
+echo "📝 Creating install-config template..."
+cat > install-config-template.yaml <<'INSTALLCONFIGEOF'
 apiVersion: v1
 baseDomain: example.com
 compute:
@@ -507,7 +289,7 @@ controlPlane:
       type: m5.xlarge
   replicas: 3
 metadata:
-  name: $cluster_name
+  name: ${CLUSTER_NAME}
 networking:
   clusterNetwork:
   - cidr: 10.128.0.0/14
@@ -524,23 +306,124 @@ platform:
     # Add your subnet IDs here
     vpc: # Add your VPC ID here
 publish: Internal
-pullSecret: '{"auths":{"registry.$cluster_name.local:$registry_port":{"auth":"$(echo -n "$DEFAULT_REGISTRY_USER:$DEFAULT_REGISTRY_PASSWORD" | base64)"}}}'
+pullSecret: '{"auths":{"registry.${CLUSTER_NAME}.local:${REGISTRY_PORT}":{"auth":"$(echo -n "${REGISTRY_USER}:${REGISTRY_PASSWORD}" | base64)"}}}'
 sshKey: |
   # Add your SSH public key here
 additionalTrustBundle: |
   # Add your registry certificate here
 imageContentSources:
 - mirrors:
-  - registry.$cluster_name.local:$registry_port/openshift/release
+  - registry.${CLUSTER_NAME}.local:${REGISTRY_PORT}/openshift/release
   source: quay.io/openshift-release-dev/ocp-release
 - mirrors:
-  - registry.$cluster_name.local:$registry_port/openshift/release
+  - registry.${CLUSTER_NAME}.local:${REGISTRY_PORT}/openshift/release
   source: quay.io/openshift-release-dev/ocp-v4.0-art-dev
+INSTALLCONFIGEOF
+
+echo ""
+echo "✅ Image synchronization completed successfully!"
+echo ""
+echo "📁 Files created in: ${SYNC_DIR}"
+echo "   mirror/: Mirrored OpenShift release images"
+echo "   imageContentSources.yaml: Image content sources configuration"
+echo "   install-config-template.yaml: Install configuration template"
+echo ""
+echo "🔗 Registry URL: ${REGISTRY_URL}"
+echo "📦 Synced repositories:"
+echo "   - OpenShift ${OPENSHIFT_VERSION} release images"
+echo "   - UBI base images (ubi8, ubi9)"
+echo "   - Essential operator catalogs"
+echo ""
+echo "📝 Next steps:"
+echo "1. Copy install-config-template.yaml and customize it"
+echo "2. Use the generated configuration for cluster installation"
+echo "3. Ensure registry certificate is added to additionalTrustBundle"
 EOF
+
+    chmod +x /tmp/sync-images-on-bastion.sh
+    echo "✅ Sync script created"
+}
+
+# Function to copy script to bastion and execute
+execute_sync_on_bastion() {
+    local bastion_ip="$1"
+    local openshift_version="$2"
+    local cluster_name="$3"
+    local registry_port="$4"
+    local registry_user="$5"
+    local registry_password="$6"
+    local bastion_key="$7"
     
-    cd - > /dev/null
+    echo "🚀 Copying sync script to bastion host..."
+    scp -i "$bastion_key" -o StrictHostKeyChecking=no /tmp/sync-images-on-bastion.sh ubuntu@"$bastion_ip":/home/ubuntu/
     
-    echo "✅ Install-config template created"
+    echo "🔄 Executing sync script on bastion host..."
+    echo "   This process may take 30-60 minutes depending on your internet connection"
+    echo "   and the number of images being synced."
+    echo ""
+    echo "📡 You can monitor progress by connecting to bastion:"
+    echo "   ssh -i $bastion_key ubuntu@$bastion_ip"
+    echo "   tail -f /home/ubuntu/openshift-sync/sync.log"
+    echo ""
+    
+    # Execute the script on bastion host
+    ssh -i "$bastion_key" -o StrictHostKeyChecking=no ubuntu@"$bastion_ip" "cd /home/ubuntu && ./sync-images-on-bastion.sh '$openshift_version' '$cluster_name' '$registry_port' '$registry_user' '$registry_password' 2>&1 | tee sync.log"
+    
+    echo ""
+    echo "✅ Image synchronization completed on bastion host!"
+}
+
+# Function to create helper scripts
+create_helper_scripts() {
+    local cluster_name="$1"
+    local infra_dir="$2"
+    local bastion_ip="$3"
+    local bastion_key="$4"
+    
+    echo "📝 Creating helper scripts..."
+    
+    # Create script to check sync status
+    cat > check-sync-status.sh <<EOF
+#!/bin/bash
+# Check sync status on bastion host
+
+BASTION_IP="$bastion_ip"
+CLUSTER_NAME="$cluster_name"
+BASTION_KEY="$bastion_key"
+
+echo "🔍 Checking sync status on bastion host..."
+ssh -i "$BASTION_KEY" -o StrictHostKeyChecking=no ubuntu@\$BASTION_IP "ls -la /home/ubuntu/openshift-sync/"
+
+echo ""
+echo "📊 Registry catalog:"
+ssh -i "$BASTION_KEY" -o StrictHostKeyChecking=no ubuntu@\$BASTION_IP "curl -k -s -u admin:admin123 https://registry.\$CLUSTER_NAME.local:5000/v2/_catalog | jq ."
+EOF
+
+    # Create script to copy files from bastion
+    cat > copy-from-bastion.sh <<EOF
+#!/bin/bash
+# Copy sync results from bastion host
+
+BASTION_IP="$bastion_ip"
+CLUSTER_NAME="$cluster_name"
+BASTION_KEY="$bastion_key"
+
+echo "📋 Copying files from bastion host..."
+mkdir -p ./bastion-output
+
+scp -i "$BASTION_KEY" -o StrictHostKeyChecking=no -r ubuntu@\$BASTION_IP:/home/ubuntu/openshift-sync/install-config-template.yaml ./bastion-output/
+scp -i "$BASTION_KEY" -o StrictHostKeyChecking=no -r ubuntu@\$BASTION_IP:/home/ubuntu/openshift-sync/imageContentSources.yaml ./bastion-output/
+
+echo "✅ Files copied to ./bastion-output/"
+echo "   - install-config-template.yaml"
+echo "   - imageContentSources.yaml"
+EOF
+
+    chmod +x check-sync-status.sh copy-from-bastion.sh
+    
+    echo "✅ Helper scripts created:"
+    echo "   - check-sync-status.sh: Check sync status on bastion"
+    echo "   - copy-from-bastion.sh: Copy files from bastion"
 }
 
 # Main execution
@@ -572,13 +455,13 @@ main() {
                 REGISTRY_PASSWORD="$2"
                 shift 2
                 ;;
-            --sync-dir)
-                SYNC_DIR="$2"
-                shift 2
-                ;;
             --dry-run)
                 DRY_RUN="yes"
                 shift
+                ;;
+            --bastion-key)
+                BASTION_KEY="$2"
+                shift 2
                 ;;
             --help)
                 usage
@@ -597,8 +480,8 @@ main() {
     REGISTRY_PORT=${REGISTRY_PORT:-$DEFAULT_REGISTRY_PORT}
     REGISTRY_USER=${REGISTRY_USER:-$DEFAULT_REGISTRY_USER}
     REGISTRY_PASSWORD=${REGISTRY_PASSWORD:-$DEFAULT_REGISTRY_PASSWORD}
-    SYNC_DIR=${SYNC_DIR:-$DEFAULT_SYNC_DIR}
     DRY_RUN=${DRY_RUN:-$DEFAULT_DRY_RUN}
+    BASTION_KEY=${BASTION_KEY:-$DEFAULT_BASTION_KEY}
     
     # Display script header
     echo "🔄 Image Synchronization for Disconnected OpenShift Cluster"
@@ -609,21 +492,21 @@ main() {
     echo "   OpenShift Version: $OPENSHIFT_VERSION"
     echo "   Registry URL: registry.$CLUSTER_NAME.local:$REGISTRY_PORT"
     echo "   Registry User: $REGISTRY_USER"
-    echo "   Sync Directory: $SYNC_DIR"
     echo "   Dry Run: $DRY_RUN"
     echo ""
     
     if [[ "$DRY_RUN" == "yes" ]]; then
         echo "🔍 DRY RUN MODE - No images will be synced"
         echo ""
-        echo "Would sync:"
-        echo "  - OpenShift $OPENSHIFT_VERSION release images"
-        echo "  - Additional images (UBI, operators, etc.)"
-        echo "  - Create mirror configuration"
+        echo "Would sync on bastion host:"
+        echo "  - OpenShift $OPENSHIFT_VERSION release images (core installation)"
+        echo "  - UBI base images (ubi8, ubi9)"
+        echo "  - Essential operator catalogs (Red Hat, Certified, Community)"
+        echo "  - Create imageContentSources configuration"
         echo "  - Generate install-config template"
         echo ""
         echo "Estimated time: 30-60 minutes"
-        echo "Estimated storage: 50-100 GB"
+        echo "Estimated storage: 20-40 GB"
         echo ""
         echo "To actually sync images, run without --dry-run"
         exit 0
@@ -635,39 +518,46 @@ main() {
     # Check infrastructure
     check_infrastructure "$INFRA_OUTPUT_DIR"
     
-    # Test registry access
-    test_registry_access "$CLUSTER_NAME" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"
+    # Get bastion info
+    get_bastion_info "$INFRA_OUTPUT_DIR"
     
-    # Download OpenShift installer
-    download_openshift_installer "$OPENSHIFT_VERSION" "$SYNC_DIR"
+    # Test bastion connectivity
+    test_bastion_connectivity "$BASTION_IP" "$BASTION_KEY"
     
-    # Create mirror configuration
-    create_mirror_config "$OPENSHIFT_VERSION" "$CLUSTER_NAME" "$REGISTRY_PORT" "$SYNC_DIR"
+    # Create sync script for bastion
+    create_bastion_sync_script "$OPENSHIFT_VERSION" "$CLUSTER_NAME" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"
     
-    # Perform mirroring
-    perform_mirroring "$OPENSHIFT_VERSION" "$CLUSTER_NAME" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD" "$SYNC_DIR"
+    # Execute sync on bastion
+    execute_sync_on_bastion "$BASTION_IP" "$OPENSHIFT_VERSION" "$CLUSTER_NAME" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD" "$BASTION_KEY"
     
-    # Create install-config template
-    create_install_config_template "$CLUSTER_NAME" "$REGISTRY_PORT" "$SYNC_DIR"
+    # Create helper scripts
+    create_helper_scripts "$CLUSTER_NAME" "$INFRA_OUTPUT_DIR" "$BASTION_IP" "$BASTION_KEY"
     
     echo ""
     echo "✅ Image synchronization completed successfully!"
     echo ""
-    echo "📁 Files created in: $SYNC_DIR"
-    echo "   mirror/: Mirrored images"
+    echo "📁 Files created on bastion host: /home/ubuntu/openshift-sync/"
+    echo "   mirror/: Mirrored OpenShift release images"
+    echo "   imageContentSources.yaml: Image content sources configuration"
     echo "   install-config-template.yaml: Install configuration template"
-    echo "   mirror-to-registry.sh: Mirror script for disconnected environment"
     echo ""
-    echo "🔗 Next steps:"
-    echo "1. Copy the $SYNC_DIR directory to your disconnected environment"
-    echo "2. Run: ./04-prepare-install-config.sh --cluster-name $CLUSTER_NAME"
-    echo "3. Use the generated install-config.yaml for cluster installation"
+    echo "🔗 Registry URL: registry.$CLUSTER_NAME.local:$REGISTRY_PORT"
+    echo "📦 Synced repositories:"
+    echo "   - OpenShift $OPENSHIFT_VERSION release images (core installation)"
+    echo "   - UBI base images (ubi8, ubi9)"
+    echo "   - Essential operator catalogs"
+    echo ""
+    echo "📝 Next steps:"
+    echo "1. Run: ./check-sync-status.sh (to verify sync status)"
+    echo "2. Run: ./copy-from-bastion.sh (to copy config files)"
+    echo "3. Customize install-config-template.yaml with your specific values"
+    echo "4. Run: ./04-prepare-install-config.sh --cluster-name $CLUSTER_NAME"
     echo ""
     echo "📝 Important notes:"
-    echo "   - The mirror directory contains all required OpenShift images"
-    echo "   - The install-config-template.yaml needs to be customized with your specific values"
-    echo "   - Ensure sufficient storage space in your disconnected environment"
-    echo "   - The registry certificate needs to be added to the additionalTrustBundle"
+    echo "   - All images are now available in the private registry"
+    echo "   - The registry certificate needs to be added to additionalTrustBundle"
+    echo "   - Cluster nodes will pull images from the private registry"
+    echo "   - Bastion host has all required images for disconnected installation"
 }
 
 # Run main function with all arguments
