@@ -8,7 +8,7 @@ set -euo pipefail
 # Default values
 DEFAULT_CLUSTER_NAME="disconnected-cluster"
 DEFAULT_REGION="us-east-1"
-DEFAULT_VPC_CIDR="10.0.0.0/16"
+DEFAULT_VPC_CIDR="172.16.0.0/16"
 DEFAULT_PRIVATE_SUBNETS=3
 DEFAULT_PUBLIC_SUBNETS=1
 DEFAULT_INSTANCE_TYPE="t3.medium"
@@ -71,6 +71,138 @@ validate_aws_credentials() {
     echo "   User ARN: $user_arn"
 }
 
+# Function to check for existing resources with same name
+check_existing_resources() {
+    local cluster_name="$1"
+    local region="$2"
+    
+    echo "   Checking for existing resources with name: $cluster_name"
+    
+    # Check for existing VPCs with same name
+    local existing_vpcs=$(aws ec2 describe-vpcs \
+        --region "$region" \
+        --filters "Name=tag:Name,Values=${cluster_name}-vpc" \
+        --query 'Vpcs[?State==`available`].[VpcId]' \
+        --output text)
+    
+    if [[ -n "$existing_vpcs" ]]; then
+        echo "❌ Found existing VPC with name ${cluster_name}-vpc: $existing_vpcs"
+        echo "   Please use a different cluster name or delete the existing VPC"
+        return 1
+    fi
+    
+    # Check for existing key pairs with same name
+    local existing_keys=$(aws ec2 describe-key-pairs \
+        --region "$region" \
+        --key-names "${cluster_name}-bastion-key" \
+        --query 'KeyPairs[].KeyName' \
+        --output text 2>/dev/null || echo "")
+    
+    if [[ -n "$existing_keys" ]]; then
+        echo "❌ Found existing key pair with name ${cluster_name}-bastion-key"
+        echo "   Please use a different cluster name or delete the existing key pair"
+        return 1
+    fi
+    
+    # Check for existing security groups with same name
+    local existing_sgs=$(aws ec2 describe-security-groups \
+        --region "$region" \
+        --filters "Name=group-name,Values=${cluster_name}-*" \
+        --query 'SecurityGroups[].GroupName' \
+        --output text 2>/dev/null || echo "")
+    
+    if [[ -n "$existing_sgs" ]]; then
+        echo "❌ Found existing security groups with name pattern ${cluster_name}-*:"
+        echo "   $existing_sgs"
+        echo "   Please use a different cluster name or delete the existing security groups"
+        return 1
+    fi
+    
+    echo "   ✅ No existing resources found with name: $cluster_name"
+}
+
+# Function to suggest alternative VPC CIDRs
+suggest_alternative_cidrs() {
+    local region="$1"
+    
+    echo "💡 Alternative VPC CIDR suggestions:"
+    echo "   - 172.16.0.0/16 (default)"
+    echo "   - 172.17.0.0/16"
+    echo "   - 172.18.0.0/16"
+    echo "   - 172.19.0.0/16"
+    echo "   - 192.168.0.0/16"
+    echo "   - 192.168.1.0/16"
+    echo ""
+    echo "You can specify a different CIDR using: --vpc-cidr <CIDR>"
+    echo "Example: $0 --vpc-cidr 172.17.0.0/16"
+}
+
+# Function to check for CIDR conflicts
+check_cidr_conflicts() {
+    local vpc_cidr="$1"
+    local region="$2"
+    
+    echo "   Checking for existing CIDR conflicts..."
+    
+    # Get all VPCs in the region
+    local existing_vpcs=$(aws ec2 describe-vpcs \
+        --region "$region" \
+        --query 'Vpcs[?State==`available`].[VpcId,CidrBlock]' \
+        --output text)
+    
+    if [[ -n "$existing_vpcs" ]]; then
+        echo "   Found existing VPCs:"
+        echo "$existing_vpcs" | while read vpc_id cidr; do
+            echo "     VPC $vpc_id: $cidr"
+        done
+    fi
+    
+    # Check if VPC CIDR overlaps with existing VPCs
+    while read vpc_id cidr; do
+        if [[ "$cidr" == "$vpc_cidr" ]]; then
+            echo "❌ VPC CIDR $vpc_cidr conflicts with existing VPC $vpc_id"
+            echo ""
+            suggest_alternative_cidrs "$region"
+            return 1
+        fi
+    done <<< "$existing_vpcs"
+    
+    echo "   ✅ No VPC CIDR conflicts found"
+}
+
+# Function to calculate non-overlapping subnet CIDRs
+calculate_subnet_cidrs() {
+    local vpc_cidr="$1"
+    local subnet_count="$2"
+    local start_offset="$3"
+    local subnet_size="$4"
+    
+    local base_network=$(echo "$vpc_cidr" | cut -d'/' -f1)
+    local vpc_prefix=$(echo "$vpc_cidr" | cut -d'/' -f2)
+    
+    # Convert base network to decimal for calculation
+    local base_octets=($(echo "$base_network" | tr '.' ' '))
+    local base_decimal=$((base_octets[0] * 16777216 + base_octets[1] * 65536 + base_octets[2] * 256 + base_octets[3]))
+    
+    local subnet_cidrs=""
+    for i in $(seq 1 $subnet_count); do
+        # Calculate subnet offset - each /24 subnet is 256 addresses apart
+        local subnet_offset=$((start_offset + (i-1) * 256))
+        local subnet_decimal=$((base_decimal + subnet_offset))
+        
+        # Convert back to IP address
+        local octet1=$((subnet_decimal / 16777216))
+        local octet2=$(((subnet_decimal % 16777216) / 65536))
+        local octet3=$(((subnet_decimal % 65536) / 256))
+        local octet4=$((subnet_decimal % 256))
+        
+        local subnet_cidr="${octet1}.${octet2}.${octet3}.${octet4}/${subnet_size}"
+        subnet_cidrs="${subnet_cidrs}${subnet_cidr},"
+    done
+    
+    echo "${subnet_cidrs%,}"
+}
+
 # Function to create VPC and subnets
 create_vpc_infrastructure() {
     local cluster_name="$1"
@@ -81,6 +213,9 @@ create_vpc_infrastructure() {
     local output_dir="$6"
     
     echo "🏗️  Creating VPC infrastructure..."
+    
+    # Check for CIDR conflicts
+    check_cidr_conflicts "$vpc_cidr" "$region"
     
     # Create VPC
     echo "   Creating VPC..."
@@ -116,14 +251,24 @@ create_vpc_infrastructure() {
         --query 'AvailabilityZones[0:3].ZoneName' \
         --output text)
     
+    # Calculate subnet CIDRs - using non-overlapping ranges
+    # Public subnets: 172.16.1.0/24, 172.16.2.0/24, 172.16.3.0/24, etc.
+    # Private subnets: 172.16.11.0/24, 172.16.12.0/24, 172.16.13.0/24, etc.
+    local public_subnet_cidrs=$(calculate_subnet_cidrs "$vpc_cidr" "$public_subnets" 256 24)
+    local private_subnet_cidrs=$(calculate_subnet_cidrs "$vpc_cidr" "$private_subnets" 2816 24)
+    
+    echo "   Public subnet CIDRs: $public_subnet_cidrs"
+    echo "   Private subnet CIDRs: $private_subnet_cidrs"
+    
     # Create public subnets
     echo "   Creating public subnets..."
     local public_subnet_ids=""
     local az_array=($azs)
+    local public_cidr_array=($(echo "$public_subnet_cidrs" | tr ',' ' '))
     
     for i in $(seq 1 $public_subnets); do
         local az="${az_array[$((i-1))]}"
-        local subnet_cidr=$(echo "$vpc_cidr" | sed "s|/16|/24|" | sed "s|.0/24|.$((i*10))/24|")
+        local subnet_cidr="${public_cidr_array[$((i-1))]}"
         
         local subnet_id=$(aws ec2 create-subnet \
             --vpc-id "$vpc_id" \
@@ -146,10 +291,11 @@ create_vpc_infrastructure() {
     # Create private subnets
     echo "   Creating private subnets..."
     local private_subnet_ids=""
+    local private_cidr_array=($(echo "$private_subnet_cidrs" | tr ',' ' '))
     
     for i in $(seq 1 $private_subnets); do
         local az="${az_array[$((i-1))]}"
-        local subnet_cidr=$(echo "$vpc_cidr" | sed "s|/16|/24|" | sed "s|.0/24|.$((i*20))/24|")
+        local subnet_cidr="${private_cidr_array[$((i-1))]}"
         
         local subnet_id=$(aws ec2 create-subnet \
             --vpc-id "$vpc_id" \
@@ -464,8 +610,49 @@ create_cluster_security_group() {
     echo "   Security Group ID: $cluster_sg_id"
 }
 
+# Function to cleanup on failure
+cleanup_on_failure() {
+    local output_dir="$1"
+    local region="$2"
+    
+    echo ""
+    echo "🧹 Cleaning up partially created resources..."
+    
+    if [[ -f "$output_dir/vpc-id" ]]; then
+        local vpc_id=$(cat "$output_dir/vpc-id")
+        echo "   Deleting VPC: $vpc_id"
+        aws ec2 delete-vpc --vpc-id "$vpc_id" --region "$region" 2>/dev/null || true
+    fi
+    
+    if [[ -f "$output_dir/bastion-instance-id" ]]; then
+        local instance_id=$(cat "$output_dir/bastion-instance-id")
+        echo "   Terminating bastion instance: $instance_id"
+        aws ec2 terminate-instances --instance-ids "$instance_id" --region "$region" 2>/dev/null || true
+    fi
+    
+    if [[ -f "$output_dir/nat-gateway-id" ]]; then
+        local nat_id=$(cat "$output_dir/nat-gateway-id")
+        echo "   Deleting NAT Gateway: $nat_id"
+        aws ec2 delete-nat-gateway --nat-gateway-id "$nat_id" --region "$region" 2>/dev/null || true
+    fi
+    
+    if [[ -f "$output_dir/eip-id" ]]; then
+        local eip_id=$(cat "$output_dir/eip-id")
+        echo "   Releasing Elastic IP: $eip_id"
+        aws ec2 release-address --allocation-id "$eip_id" --region "$region" 2>/dev/null || true
+    fi
+    
+    echo "   Removing output directory: $output_dir"
+    rm -rf "$output_dir" 2>/dev/null || true
+    
+    echo "✅ Cleanup completed"
+}
+
 # Main execution
 main() {
+    # Set up trap for cleanup on script exit
+    trap 'echo ""; echo "❌ Script interrupted. Cleaning up..."; cleanup_on_failure "$OUTPUT_DIR" "$REGION"; exit 1' INT TERM
+    
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -558,16 +745,36 @@ main() {
     # Validate AWS credentials
     validate_aws_credentials
     
+    # Check for existing resources with same name
+    if ! check_existing_resources "$CLUSTER_NAME" "$REGION"; then
+        exit 1
+    fi
+    
     # Create VPC infrastructure
-    create_vpc_infrastructure "$CLUSTER_NAME" "$REGION" "$VPC_CIDR" "$PRIVATE_SUBNETS" "$PUBLIC_SUBNETS" "$OUTPUT_DIR"
+    if ! create_vpc_infrastructure "$CLUSTER_NAME" "$REGION" "$VPC_CIDR" "$PRIVATE_SUBNETS" "$PUBLIC_SUBNETS" "$OUTPUT_DIR"; then
+        echo "❌ Failed to create VPC infrastructure"
+        cleanup_on_failure "$OUTPUT_DIR" "$REGION"
+        exit 1
+    fi
     
     # Create bastion host
     local vpc_id=$(cat "$OUTPUT_DIR/vpc-id")
     local public_subnet_ids=$(cat "$OUTPUT_DIR/public-subnet-ids")
-    create_bastion_host "$CLUSTER_NAME" "$REGION" "$vpc_id" "$public_subnet_ids" "$INSTANCE_TYPE" "$OUTPUT_DIR"
+    if ! create_bastion_host "$CLUSTER_NAME" "$REGION" "$vpc_id" "$public_subnet_ids" "$INSTANCE_TYPE" "$OUTPUT_DIR"; then
+        echo "❌ Failed to create bastion host"
+        cleanup_on_failure "$OUTPUT_DIR" "$REGION"
+        exit 1
+    fi
     
     # Create cluster security group
-    create_cluster_security_group "$CLUSTER_NAME" "$REGION" "$vpc_id" "$OUTPUT_DIR"
+    if ! create_cluster_security_group "$CLUSTER_NAME" "$REGION" "$vpc_id" "$OUTPUT_DIR"; then
+        echo "❌ Failed to create cluster security group"
+        cleanup_on_failure "$OUTPUT_DIR" "$REGION"
+        exit 1
+    fi
+    
+    # Remove trap since we succeeded
+    trap - INT TERM
     
     echo ""
     echo "✅ Infrastructure creation completed successfully!"
