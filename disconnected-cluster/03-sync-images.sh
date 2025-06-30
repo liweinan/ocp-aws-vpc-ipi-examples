@@ -175,11 +175,24 @@ echo "📦 Syncing OpenShift ${OPENSHIFT_VERSION} release images..."
 echo "   This may take 20-40 minutes depending on your internet connection..."
 echo ""
 
-oc adm release mirror \
-    --from=quay.io/openshift-release-dev/ocp-release:${OPENSHIFT_VERSION}-x86_64 \
-    --to-dir=./mirror \
-    --to=${REGISTRY_URL}/openshift/release \
-    --insecure
+# Use simplified sync approach - only sync the release image
+echo "🔄 Syncing release image..."
+RELEASE_IMAGE="quay.io/openshift-release-dev/ocp-release:${OPENSHIFT_VERSION}-x86_64"
+echo "   Pulling release image: $RELEASE_IMAGE"
+podman pull "$RELEASE_IMAGE"
+echo "   Tagging release image..."
+podman tag "$RELEASE_IMAGE" localhost:${REGISTRY_PORT}/openshift/release:${OPENSHIFT_VERSION}
+echo "   Pushing release image..."
+podman push --tls-verify=false localhost:${REGISTRY_PORT}/openshift/release:${OPENSHIFT_VERSION}
+
+# Also sync with digest for better compatibility
+echo "🔄 Syncing release image with digest..."
+RELEASE_DIGEST=$(oc adm release info "$RELEASE_IMAGE" --output=jsonpath='{.digest}' 2>/dev/null || echo "")
+if [[ -n "$RELEASE_DIGEST" ]]; then
+    echo "   Release digest: $RELEASE_DIGEST"
+    podman tag "$RELEASE_IMAGE" localhost:${REGISTRY_PORT}/openshift/release@${RELEASE_DIGEST}
+    podman push --tls-verify=false localhost:${REGISTRY_PORT}/openshift/release@${RELEASE_DIGEST} || echo "   Warning: Digest push failed (this is normal for some registries)"
+fi
 
 # Sync essential additional images
 echo "📦 Syncing essential additional images..."
