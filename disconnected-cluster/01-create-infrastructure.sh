@@ -1,5 +1,311 @@
-# Create user data script for Ubuntu with podman
-cat > "$output_dir/bastion-userdata.sh" <<'EOF'
+#!/bin/bash
+
+# Disconnected Cluster Infrastructure Creation Script
+# Creates VPC, subnets, security groups, and bastion host for disconnected OpenShift cluster
+
+set -euo pipefail
+
+# Default values
+DEFAULT_CLUSTER_NAME="disconnected-cluster"
+DEFAULT_REGION="us-east-1"
+DEFAULT_VPC_CIDR="10.0.0.0/16"
+DEFAULT_PRIVATE_SUBNETS=3
+DEFAULT_PUBLIC_SUBNETS=1
+DEFAULT_INSTANCE_TYPE="t3.medium"
+DEFAULT_AMI_OWNER="amazon"
+DEFAULT_AMI_NAME="amzn2-ami-hvm-*-x86_64-gp2"
+DEFAULT_OUTPUT_DIR="./infra-output"
+
+# Function to display usage
+usage() {
+    echo "Usage: $0 [options]"
+    echo "Options:"
+    echo "  --cluster-name        Cluster name (default: $DEFAULT_CLUSTER_NAME)"
+    echo "  --region              AWS region (default: $DEFAULT_REGION)"
+    echo "  --vpc-cidr            VPC CIDR block (default: $DEFAULT_VPC_CIDR)"
+    echo "  --private-subnets     Number of private subnets (default: $DEFAULT_PRIVATE_SUBNETS)"
+    echo "  --public-subnets      Number of public subnets (default: $DEFAULT_PUBLIC_SUBNETS)"
+    echo "  --instance-type       Bastion instance type (default: $DEFAULT_INSTANCE_TYPE)"
+    echo "  --output-dir          Output directory (default: $DEFAULT_OUTPUT_DIR)"
+    echo "  --dry-run             Show what would be created without actually creating"
+    echo "  --help                Display this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0 --cluster-name my-disconnected-cluster --region us-east-1"
+    echo "  $0 --dry-run --cluster-name test-cluster"
+    exit 1
+}
+
+# Function to check if required tools are available
+check_prerequisites() {
+    local missing_tools=()
+    
+    for tool in aws jq yq; do
+        if ! command -v "$tool" &> /dev/null; then
+            missing_tools+=("$tool")
+        fi
+    done
+    
+    if [[ ${#missing_tools[@]} -gt 0 ]]; then
+        echo "❌ Missing required tools: ${missing_tools[*]}"
+        echo "Please install the missing tools and try again"
+        exit 1
+    fi
+    
+    echo "✅ All required tools are available"
+}
+
+# Function to validate AWS credentials
+validate_aws_credentials() {
+    if ! aws sts get-caller-identity &> /dev/null; then
+        echo "❌ AWS credentials not configured or invalid"
+        echo "Please run 'aws configure' or set appropriate environment variables"
+        exit 1
+    fi
+    
+    local account_id=$(aws sts get-caller-identity --query 'Account' --output text)
+    local user_arn=$(aws sts get-caller-identity --query 'Arn' --output text)
+    
+    echo "✅ AWS credentials validated"
+    echo "   Account ID: $account_id"
+    echo "   User ARN: $user_arn"
+}
+
+# Function to create VPC and subnets
+create_vpc_infrastructure() {
+    local cluster_name="$1"
+    local region="$2"
+    local vpc_cidr="$3"
+    local private_subnets="$4"
+    local public_subnets="$5"
+    local output_dir="$6"
+    
+    echo "🏗️  Creating VPC infrastructure..."
+    
+    # Create VPC
+    echo "   Creating VPC..."
+    local vpc_id=$(aws ec2 create-vpc \
+        --cidr-block "$vpc_cidr" \
+        --region "$region" \
+        --tag-specifications "ResourceType=vpc,Tags=[{Key=Name,Value=${cluster_name}-vpc},{Key=kubernetes.io/cluster/${cluster_name},Value=shared}]" \
+        --query 'Vpc.VpcId' \
+        --output text)
+    
+    # Enable DNS hostnames
+    aws ec2 modify-vpc-attribute \
+        --vpc-id "$vpc_id" \
+        --enable-dns-hostnames \
+        --region "$region"
+    
+    # Create Internet Gateway
+    echo "   Creating Internet Gateway..."
+    local igw_id=$(aws ec2 create-internet-gateway \
+        --region "$region" \
+        --tag-specifications "ResourceType=internet-gateway,Tags=[{Key=Name,Value=${cluster_name}-igw}]" \
+        --query 'InternetGateway.InternetGatewayId' \
+        --output text)
+    
+    aws ec2 attach-internet-gateway \
+        --vpc-id "$vpc_id" \
+        --internet-gateway-id "$igw_id" \
+        --region "$region"
+    
+    # Get availability zones
+    local azs=$(aws ec2 describe-availability-zones \
+        --region "$region" \
+        --query 'AvailabilityZones[0:3].ZoneName' \
+        --output text)
+    
+    # Create public subnets
+    echo "   Creating public subnets..."
+    local public_subnet_ids=""
+    local az_array=($azs)
+    
+    for i in $(seq 1 $public_subnets); do
+        local az="${az_array[$((i-1))]}"
+        local subnet_cidr=$(echo "$vpc_cidr" | sed "s|/16|/24|" | sed "s|.0/24|.$((i*10))/24|")
+        
+        local subnet_id=$(aws ec2 create-subnet \
+            --vpc-id "$vpc_id" \
+            --cidr-block "$subnet_cidr" \
+            --availability-zone "$az" \
+            --region "$region" \
+            --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=${cluster_name}-public-${i}},{Key=kubernetes.io/role/elb,Value=1}]" \
+            --query 'Subnet.SubnetId' \
+            --output text)
+        
+        aws ec2 modify-subnet-attribute \
+            --subnet-id "$subnet_id" \
+            --map-public-ip-on-launch \
+            --region "$region"
+        
+        public_subnet_ids="${public_subnet_ids}${subnet_id},"
+    done
+    public_subnet_ids=${public_subnet_ids%,}
+    
+    # Create private subnets
+    echo "   Creating private subnets..."
+    local private_subnet_ids=""
+    
+    for i in $(seq 1 $private_subnets); do
+        local az="${az_array[$((i-1))]}"
+        local subnet_cidr=$(echo "$vpc_cidr" | sed "s|/16|/24|" | sed "s|.0/24|.$((i*20))/24|")
+        
+        local subnet_id=$(aws ec2 create-subnet \
+            --vpc-id "$vpc_id" \
+            --cidr-block "$subnet_cidr" \
+            --availability-zone "$az" \
+            --region "$region" \
+            --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=${cluster_name}-private-${i}},{Key=kubernetes.io/role/internal-elb,Value=1}]" \
+            --query 'Subnet.SubnetId' \
+            --output text)
+        
+        private_subnet_ids="${private_subnet_ids}${subnet_id},"
+    done
+    private_subnet_ids=${private_subnet_ids%,}
+    
+    # Note: Disconnected cluster does not need NAT Gateway
+    # Private subnets will be completely isolated from internet
+    echo "   Skipping NAT Gateway creation for disconnected cluster..."
+    echo "   Private subnets will be completely isolated from internet"
+    
+    # Create route tables
+    echo "   Creating route tables..."
+    
+    # Public route table
+    local public_rt_id=$(aws ec2 create-route-table \
+        --vpc-id "$vpc_id" \
+        --region "$region" \
+        --tag-specifications "ResourceType=route-table,Tags=[{Key=Name,Value=${cluster_name}-public-rt}]" \
+        --query 'RouteTable.RouteTableId' \
+        --output text)
+    
+    aws ec2 create-route \
+        --route-table-id "$public_rt_id" \
+        --destination-cidr-block 0.0.0.0/0 \
+        --gateway-id "$igw_id" \
+        --region "$region"
+    
+    # Associate public subnets with public route table
+    for subnet_id in $(echo "$public_subnet_ids" | tr ',' ' '); do
+        aws ec2 associate-route-table \
+            --subnet-id "$subnet_id" \
+            --route-table-id "$public_rt_id" \
+            --region "$region"
+    done
+    
+    # Private route table
+    local private_rt_id=$(aws ec2 create-route-table \
+        --vpc-id "$vpc_id" \
+        --region "$region" \
+        --tag-specifications "ResourceType=route-table,Tags=[{Key=Name,Value=${cluster_name}-private-rt}]" \
+        --query 'RouteTable.RouteTableId' \
+        --output text)
+    
+    # Private subnets have no internet access - truly disconnected
+    # No route to internet (0.0.0.0/0) is added to private route table
+    echo "   Private subnets configured with no internet access"
+    
+    # Associate private subnets with private route table
+    for subnet_id in $(echo "$private_subnet_ids" | tr ',' ' '); do
+        aws ec2 associate-route-table \
+            --subnet-id "$subnet_id" \
+            --route-table-id "$private_rt_id" \
+            --region "$region"
+    done
+    
+    # Save infrastructure information
+    mkdir -p "$output_dir"
+    echo "$vpc_id" > "$output_dir/vpc-id"
+    echo "$public_subnet_ids" > "$output_dir/public-subnet-ids"
+    echo "$private_subnet_ids" > "$output_dir/private-subnet-ids"
+    echo "$azs" > "$output_dir/availability-zones"
+    echo "$region" > "$output_dir/region"
+    echo "$vpc_cidr" > "$output_dir/vpc-cidr"
+    # No NAT Gateway for disconnected cluster
+    echo "none" > "$output_dir/nat-gateway-id"
+    echo "none" > "$output_dir/eip-id"
+    
+    echo "✅ VPC infrastructure created successfully"
+    echo "   VPC ID: $vpc_id"
+    echo "   Public Subnets: $public_subnet_ids"
+    echo "   Private Subnets: $private_subnet_ids"
+    echo "   NAT Gateway: None (disconnected cluster)"
+}
+
+# Function to create bastion host
+create_bastion_host() {
+    local cluster_name="$1"
+    local region="$2"
+    local vpc_id="$3"
+    local public_subnet_ids="$4"
+    local instance_type="$5"
+    local output_dir="$6"
+    
+    echo "🏗️  Creating bastion host..."
+    
+    # Create bastion security group
+    echo "   Creating bastion security group..."
+    local bastion_sg_id=$(aws ec2 create-security-group \
+        --group-name "${cluster_name}-bastion-sg" \
+        --description "Security group for bastion host" \
+        --vpc-id "$vpc_id" \
+        --region "$region" \
+        --tag-specifications "ResourceType=security-group,Tags=[{Key=Name,Value=${cluster_name}-bastion-sg}]" \
+        --query 'GroupId' \
+        --output text)
+    
+    # Configure security group rules
+    aws ec2 authorize-security-group-ingress \
+        --group-id "$bastion_sg_id" \
+        --protocol tcp \
+        --port 22 \
+        --cidr 0.0.0.0/0 \
+        --region "$region"
+    
+    # Allow HTTP/HTTPS for registry access
+    aws ec2 authorize-security-group-ingress \
+        --group-id "$bastion_sg_id" \
+        --protocol tcp \
+        --port 80 \
+        --cidr 0.0.0.0/0 \
+        --region "$region"
+    
+    aws ec2 authorize-security-group-ingress \
+        --group-id "$bastion_sg_id" \
+        --protocol tcp \
+        --port 443 \
+        --cidr 0.0.0.0/0 \
+        --region "$region"
+    
+    # Allow registry port from VPC only (not from internet)
+    aws ec2 authorize-security-group-ingress \
+        --group-id "$bastion_sg_id" \
+        --protocol tcp \
+        --port 5000 \
+        --cidr "$vpc_cidr" \
+        --region "$region"
+    
+    # Create SSH key pair
+    echo "   Creating SSH key pair..."
+    aws ec2 create-key-pair \
+        --key-name "${cluster_name}-bastion-key" \
+        --region "$region" \
+        --query 'KeyMaterial' \
+        --output text > "$output_dir/bastion-key.pem"
+    
+    chmod 600 "$output_dir/bastion-key.pem"
+    
+    # Get latest Ubuntu 22.04 AMI
+    local ami_id=$(aws ec2 describe-images \
+        --owners 099720109477 \
+        --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-22.04-*-amd64-server-*" "Name=state,Values=available" \
+        --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
+        --region "$region" \
+        --output text)
+    
+    # Create user data script
+    cat > "$output_dir/bastion-userdata.sh" <<'EOF'
 #!/bin/bash
 # Bastion host setup script for disconnected OpenShift cluster
 
@@ -8,10 +314,7 @@ apt update -y
 apt upgrade -y
 
 # Install required packages
-apt install -y jq wget tar gzip unzip git curl apache2-utils
-
-# Install podman
-apt install -y podman
+apt install -y jq wget tar gzip unzip git curl apache2-utils podman
 
 # Start and enable podman socket
 systemctl enable podman.socket
@@ -66,3 +369,220 @@ chown ubuntu:ubuntu /home/ubuntu/setup-registry.sh
 
 echo "✅ Bastion host setup completed"
 EOF
+    
+    # Launch bastion instance
+    echo "   Launching bastion instance..."
+    local first_public_subnet=$(echo "$public_subnet_ids" | cut -d',' -f1)
+    
+    local instance_id=$(aws ec2 run-instances \
+        --image-id "$ami_id" \
+        --instance-type "$instance_type" \
+        --key-name "${cluster_name}-bastion-key" \
+        --security-group-ids "$bastion_sg_id" \
+        --subnet-id "$first_public_subnet" \
+        --associate-public-ip-address \
+        --user-data file://"$output_dir/bastion-userdata.sh" \
+        --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${cluster_name}-bastion}]" \
+        --region "$region" \
+        --query 'Instances[0].InstanceId' \
+        --output text)
+    
+    # Wait for instance to be running
+    echo "   Waiting for bastion instance to be ready..."
+    aws ec2 wait instance-running \
+        --instance-ids "$instance_id" \
+        --region "$region"
+    
+    # Get bastion public IP
+    local bastion_public_ip=$(aws ec2 describe-instances \
+        --instance-ids "$instance_id" \
+        --region "$region" \
+        --query 'Reservations[0].Instances[0].PublicIpAddress' \
+        --output text)
+    
+    # Save bastion information
+    echo "$instance_id" > "$output_dir/bastion-instance-id"
+    echo "$bastion_public_ip" > "$output_dir/bastion-public-ip"
+    echo "$bastion_sg_id" > "$output_dir/bastion-security-group-id"
+    
+    echo "✅ Bastion host created successfully"
+    echo "   Instance ID: $instance_id"
+    echo "   Public IP: $bastion_public_ip"
+    echo "   SSH Key: $output_dir/bastion-key.pem"
+}
+
+# Function to create cluster security group
+create_cluster_security_group() {
+    local cluster_name="$1"
+    local region="$2"
+    local vpc_id="$3"
+    local output_dir="$4"
+    
+    echo "🏗️  Creating cluster security group..."
+    
+    local cluster_sg_id=$(aws ec2 create-security-group \
+        --group-name "${cluster_name}-cluster-sg" \
+        --description "Security group for OpenShift cluster" \
+        --vpc-id "$vpc_id" \
+        --region "$region" \
+        --tag-specifications "ResourceType=security-group,Tags=[{Key=Name,Value=${cluster_name}-cluster-sg}]" \
+        --query 'GroupId' \
+        --output text)
+    
+    # Allow all traffic within the security group
+    aws ec2 authorize-security-group-ingress \
+        --group-id "$cluster_sg_id" \
+        --protocol all \
+        --source-group "$cluster_sg_id" \
+        --region "$region"
+    
+    # Allow SSH from bastion
+    local bastion_sg_id=$(cat "$output_dir/bastion-security-group-id")
+    aws ec2 authorize-security-group-ingress \
+        --group-id "$cluster_sg_id" \
+        --protocol tcp \
+        --port 22 \
+        --source-group "$bastion_sg_id" \
+        --region "$region"
+    
+    # Allow registry access from cluster
+    aws ec2 authorize-security-group-ingress \
+        --group-id "$cluster_sg_id" \
+        --protocol tcp \
+        --port 5000 \
+        --source-group "$cluster_sg_id" \
+        --region "$region"
+    
+    echo "$cluster_sg_id" > "$output_dir/cluster-security-group-id"
+    
+    echo "✅ Cluster security group created"
+    echo "   Security Group ID: $cluster_sg_id"
+}
+
+# Main execution
+main() {
+    # Parse command line arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --cluster-name)
+                CLUSTER_NAME="$2"
+                shift 2
+                ;;
+            --region)
+                REGION="$2"
+                shift 2
+                ;;
+            --vpc-cidr)
+                VPC_CIDR="$2"
+                shift 2
+                ;;
+            --private-subnets)
+                PRIVATE_SUBNETS="$2"
+                shift 2
+                ;;
+            --public-subnets)
+                PUBLIC_SUBNETS="$2"
+                shift 2
+                ;;
+            --instance-type)
+                INSTANCE_TYPE="$2"
+                shift 2
+                ;;
+            --output-dir)
+                OUTPUT_DIR="$2"
+                shift 2
+                ;;
+            --dry-run)
+                DRY_RUN="yes"
+                shift
+                ;;
+            --help)
+                usage
+                ;;
+            *)
+                echo "Unknown option: $1"
+                usage
+                ;;
+        esac
+    done
+    
+    # Set default values
+    CLUSTER_NAME=${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}
+    REGION=${REGION:-$DEFAULT_REGION}
+    VPC_CIDR=${VPC_CIDR:-$DEFAULT_VPC_CIDR}
+    PRIVATE_SUBNETS=${PRIVATE_SUBNETS:-$DEFAULT_PRIVATE_SUBNETS}
+    PUBLIC_SUBNETS=${PUBLIC_SUBNETS:-$DEFAULT_PUBLIC_SUBNETS}
+    INSTANCE_TYPE=${INSTANCE_TYPE:-$DEFAULT_INSTANCE_TYPE}
+    OUTPUT_DIR=${OUTPUT_DIR:-$DEFAULT_OUTPUT_DIR}
+    DRY_RUN=${DRY_RUN:-no}
+    
+    # Display script header
+    echo "🚀 Disconnected Cluster Infrastructure Creation"
+    echo "==============================================="
+    echo ""
+    echo "📋 Configuration:"
+    echo "   Cluster Name: $CLUSTER_NAME"
+    echo "   Region: $REGION"
+    echo "   VPC CIDR: $VPC_CIDR"
+    echo "   Private Subnets: $PRIVATE_SUBNETS"
+    echo "   Public Subnets: $PUBLIC_SUBNETS"
+    echo "   Bastion Instance Type: $INSTANCE_TYPE"
+    echo "   Output Directory: $OUTPUT_DIR"
+    echo "   Dry Run: $DRY_RUN"
+    echo ""
+    
+    if [[ "$DRY_RUN" == "yes" ]]; then
+        echo "🔍 DRY RUN MODE - No resources will be created"
+        echo ""
+        echo "Would create:"
+        echo "  - VPC with CIDR $VPC_CIDR"
+        echo "  - $PUBLIC_SUBNETS public subnet(s)"
+        echo "  - $PRIVATE_SUBNETS private subnet(s)"
+        echo "  - No NAT Gateway (disconnected cluster)"
+        echo "  - Bastion host ($INSTANCE_TYPE)"
+        echo "  - Security groups"
+        echo "  - SSH key pair"
+        echo ""
+        echo "To actually create resources, run without --dry-run"
+        exit 0
+    fi
+    
+    # Check prerequisites
+    check_prerequisites
+    
+    # Validate AWS credentials
+    validate_aws_credentials
+    
+    # Create VPC infrastructure
+    create_vpc_infrastructure "$CLUSTER_NAME" "$REGION" "$VPC_CIDR" "$PRIVATE_SUBNETS" "$PUBLIC_SUBNETS" "$OUTPUT_DIR"
+    
+    # Create bastion host
+    local vpc_id=$(cat "$OUTPUT_DIR/vpc-id")
+    local public_subnet_ids=$(cat "$OUTPUT_DIR/public-subnet-ids")
+    create_bastion_host "$CLUSTER_NAME" "$REGION" "$vpc_id" "$public_subnet_ids" "$INSTANCE_TYPE" "$OUTPUT_DIR"
+    
+    # Create cluster security group
+    create_cluster_security_group "$CLUSTER_NAME" "$REGION" "$vpc_id" "$OUTPUT_DIR"
+    
+    echo ""
+    echo "✅ Infrastructure creation completed successfully!"
+    echo ""
+    echo "📁 Output files saved to: $OUTPUT_DIR"
+    echo "   vpc-id: VPC identifier"
+    echo "   public-subnet-ids: Public subnet identifiers"
+    echo "   private-subnet-ids: Private subnet identifiers"
+    echo "   bastion-public-ip: Bastion host public IP"
+    echo "   bastion-key.pem: SSH private key for bastion access"
+    echo ""
+    echo "🔗 Next steps:"
+    echo "1. Connect to bastion host: ssh -i $OUTPUT_DIR/bastion-key.pem ubuntu@$(cat $OUTPUT_DIR/bastion-public-ip)"
+    echo "2. Run: ./02-setup-mirror-registry.sh --cluster-name $CLUSTER_NAME"
+    echo ""
+    echo "⚠️  Important:"
+    echo "   - Keep the SSH key file secure: $OUTPUT_DIR/bastion-key.pem"
+    echo "   - The bastion host is accessible from the internet"
+    echo "   - Private subnets are completely isolated from internet (disconnected cluster)"
+}
+
+# Run main function with all arguments
+main "$@" 
