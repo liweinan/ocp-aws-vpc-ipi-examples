@@ -1,8 +1,7 @@
 #!/bin/bash
 
 # Install Config Preparation Script for Disconnected OpenShift Cluster
-# Generates install-config.yaml for disconnected cluster installation
-# This script runs on the bastion host
+# This script can run locally to copy itself to bastion, or directly on bastion host
 
 set -euo pipefail
 
@@ -17,6 +16,7 @@ DEFAULT_REGISTRY_USER="admin"
 DEFAULT_REGISTRY_PASSWORD="admin123"
 DEFAULT_INSTALL_DIR="./openshift-install"
 DEFAULT_SSH_KEY="~/.ssh/id_rsa.pub"
+DEFAULT_BASTION_KEY="./infra-output/bastion-key.pem"
 
 # Function to display usage
 usage() {
@@ -33,13 +33,57 @@ usage() {
     echo "  --install-dir         Installation directory (default: $DEFAULT_INSTALL_DIR)"
     echo "  --ssh-key             SSH public key file (default: $DEFAULT_SSH_KEY)"
     echo "  --pull-secret         Pull secret file or content"
+    echo "  --bastion-key         Bastion SSH key (default: $DEFAULT_BASTION_KEY)"
+    echo "  --copy-to-bastion     Copy script to bastion and execute there"
     echo "  --dry-run             Show what would be created without actually creating"
     echo "  --help                Display this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 --cluster-name my-cluster --base-domain mydomain.com"
+    echo "  $0 --cluster-name my-cluster --base-domain mydomain.com --copy-to-bastion"
     echo "  $0 --pull-secret pull-secret.json --ssh-key ~/.ssh/id_ed25519.pub"
     exit 1
+}
+
+# Function to check if running on bastion host
+is_bastion_host() {
+    [[ -f "/opt/registry/certs/domain.crt" ]] && [[ -d "/home/ubuntu" ]]
+}
+
+# Function to copy script to bastion and execute
+copy_and_execute_on_bastion() {
+    local cluster_name="$1"
+    local base_domain="$2"
+    local region="$3"
+    local registry_port="$4"
+    local registry_user="$5"
+    local registry_password="$6"
+    local ssh_key="$7"
+    local pull_secret="$8"
+    local bastion_key="$9"
+    local infra_dir="${10}"
+    
+    echo "🚀 Copying script to bastion host..."
+    
+    # Get bastion IP
+    local bastion_ip=$(cat "$infra_dir/bastion-public-ip")
+    
+    # Copy script to bastion
+    scp -i "$bastion_key" -o StrictHostKeyChecking=no "$0" "ubuntu@$bastion_ip:/home/ubuntu/prepare-install-config.sh"
+    
+    echo "🔧 Executing script on bastion host..."
+    echo "   This will prepare install-config.yaml and download OpenShift installer"
+    echo ""
+    
+    # Execute script on bastion with all parameters
+    ssh -i "$bastion_key" -o StrictHostKeyChecking=no "ubuntu@$bastion_ip" "cd /home/ubuntu && chmod +x prepare-install-config.sh && ./prepare-install-config.sh --cluster-name '$cluster_name' --base-domain '$base_domain' --region '$region' --registry-port '$registry_port' --registry-user '$registry_user' --registry-password '$registry_password' --ssh-key '$ssh_key' --pull-secret '$pull_secret'"
+    
+    echo ""
+    echo "✅ Install config preparation completed on bastion host!"
+    echo ""
+    echo "🔗 To connect to bastion and start installation:"
+    echo "   ssh -i $bastion_key ubuntu@$bastion_ip"
+    echo "   cd /home/ubuntu/openshift-install"
+    echo "   ./openshift-install create cluster --log-level=info"
 }
 
 # Function to check prerequisites
@@ -664,6 +708,14 @@ main() {
                 PULL_SECRET="$2"
                 shift 2
                 ;;
+            --bastion-key)
+                BASTION_KEY="$2"
+                shift 2
+                ;;
+            --copy-to-bastion)
+                COPY_TO_BASTION="yes"
+                shift
+                ;;
             --dry-run)
                 DRY_RUN="yes"
                 shift
@@ -690,6 +742,8 @@ main() {
     INSTALL_DIR=${INSTALL_DIR:-$DEFAULT_INSTALL_DIR}
     SSH_KEY=${SSH_KEY:-$DEFAULT_SSH_KEY}
     PULL_SECRET=${PULL_SECRET:-}
+    BASTION_KEY=${BASTION_KEY:-$DEFAULT_BASTION_KEY}
+    COPY_TO_BASTION=${COPY_TO_BASTION:-no}
     DRY_RUN=${DRY_RUN:-no}
     
     # Display script header
@@ -738,18 +792,45 @@ main() {
     # Get pull secret
     local pull_secret_content=$(get_pull_secret "$PULL_SECRET")
     
-    # Get bastion information
-    local bastion_ip=$(cat "$INFRA_OUTPUT_DIR/bastion-public-ip")
-    local bastion_key="$INFRA_OUTPUT_DIR/bastion-key.pem"
-    
-    # Get registry certificate
-    local registry_cert=$(get_registry_certificate "$CLUSTER_NAME" "$REGISTRY_PORT" "$INFRA_OUTPUT_DIR")
-    
-    # Create installation script for bastion host
-    create_bastion_install_script "$CLUSTER_NAME" "$BASE_DOMAIN" "$region" "$vpc_id" "$private_subnet_ids" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD" "$ssh_key_content" "$pull_secret_content" "4.18.15"
-    
-    # Execute installation script on bastion host
-    execute_install_on_bastion "$bastion_ip" "$bastion_key" "$CLUSTER_NAME" "$BASE_DOMAIN" "$region" "$vpc_id" "$private_subnet_ids" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD" "$ssh_key_content" "$pull_secret_content" "4.18.15"
+    # Check if we should copy to bastion or run locally
+    if [[ "$COPY_TO_BASTION" == "yes" ]]; then
+        # Copy script to bastion and execute there
+        copy_and_execute_on_bastion "$CLUSTER_NAME" "$BASE_DOMAIN" "$region" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD" "$SSH_KEY" "$PULL_SECRET" "$BASTION_KEY" "$INFRA_OUTPUT_DIR"
+    elif is_bastion_host; then
+        # Running on bastion host - execute locally
+        echo "🔧 Running on bastion host - preparing install config locally..."
+        
+        # Get registry certificate directly
+        local registry_cert=$(sudo cat /opt/registry/certs/domain.crt)
+        
+        # Create install-config.yaml
+        create_install_config "$CLUSTER_NAME" "$BASE_DOMAIN" "$region" "$vpc_id" "$private_subnet_ids" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD" "$ssh_key_content" "$pull_secret_content" "$registry_cert" "$INSTALL_DIR"
+        
+        # Download OpenShift installer
+        if [[ ! -f "$INSTALL_DIR/openshift-install" ]]; then
+            echo "📥 Downloading OpenShift installer..."
+            cd "$INSTALL_DIR"
+            curl -L "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.18.15/openshift-install-linux.tar.gz" | tar xz
+            chmod +x openshift-install
+        fi
+        
+        echo "✅ Install config preparation completed on bastion host!"
+        echo ""
+        echo "🚀 To start cluster installation:"
+        echo "   cd $INSTALL_DIR"
+        echo "   ./openshift-install create cluster --log-level=info"
+    else
+        # Running locally but not copying to bastion - show instructions
+        echo "❌ This script should be run on bastion host or with --copy-to-bastion flag"
+        echo ""
+        echo "Options:"
+        echo "1. Run with --copy-to-bastion to copy script to bastion and execute there"
+        echo "2. Copy this script to bastion manually and run it there"
+        echo ""
+        echo "Example:"
+        echo "   $0 --cluster-name $CLUSTER_NAME --copy-to-bastion --pull-secret '$PULL_SECRET'"
+        exit 1
+    fi
     
     # Validate install-config.yaml
     validate_install_config "$INSTALL_DIR"
