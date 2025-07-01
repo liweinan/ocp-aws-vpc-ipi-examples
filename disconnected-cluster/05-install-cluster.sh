@@ -182,15 +182,32 @@ check_registry_access() {
     
     echo "🔍 Checking registry access..."
     
-    local bastion_ip=$(cat "$infra_dir/bastion-public-ip")
-    
-    # Test registry access through bastion
-    if curl -k -s "https://registry.$cluster_name.local:5000/v2/_catalog" >/dev/null 2>&1; then
-        echo "✅ Registry access working"
+    # Check if we're running on bastion host (registry should be local)
+    if [[ -f "/opt/registry/certs/domain.crt" ]]; then
+        # We're on bastion host, check local registry
+        if curl -k -s "https://registry.$cluster_name.local:5000/v2/_catalog" >/dev/null 2>&1; then
+            echo "✅ Local registry access working"
+        else
+            echo "⚠️  Local registry access test failed"
+            echo "   Checking if registry container is running..."
+            if podman ps | grep -q registry; then
+                echo "   Registry container is running, but access failed"
+                echo "   This might be a certificate or network issue"
+            else
+                echo "   Registry container is not running"
+                echo "   Please ensure registry is started: sudo systemctl start registry"
+            fi
+        fi
     else
-        echo "⚠️  Registry access test failed"
-        echo "   This might be normal if you haven't added the hosts entry yet"
-        echo "   Make sure to add: $bastion_ip registry.$cluster_name.local to /etc/hosts"
+        # We're not on bastion host, check through bastion
+        local bastion_ip=$(cat "$infra_dir/bastion-public-ip")
+        if curl -k -s "https://$bastion_ip:5000/v2/_catalog" >/dev/null 2>&1; then
+            echo "✅ Registry access through bastion working"
+        else
+            echo "⚠️  Registry access test failed"
+            echo "   This might be normal if you haven't added the hosts entry yet"
+            echo "   Make sure to add: $bastion_ip registry.$cluster_name.local to /etc/hosts"
+        fi
     fi
 }
 

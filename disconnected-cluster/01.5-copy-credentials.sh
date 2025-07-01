@@ -100,6 +100,35 @@ copy_credentials() {
     echo -e "${GREEN}✅ Credentials copied successfully!${NC}"
 }
 
+# Function to copy installation scripts
+copy_installation_scripts() {
+    local bastion_ip=$(cat ./infra-output/bastion-public-ip)
+    local ssh_key="./infra-output/bastion-key.pem"
+    
+    echo -e "${BLUE}📦 Copying installation scripts to bastion host...${NC}"
+    
+    # Copy all installation scripts
+    local scripts=(
+        "02-setup-mirror-registry.sh"
+        "03-sync-images.sh"
+        "04-prepare-install-config.sh"
+        "05-install-cluster.sh"
+        "06-verify-cluster.sh"
+    )
+    
+    for script in "${scripts[@]}"; do
+        if [[ -f "$script" ]]; then
+            echo -e "${BLUE}   Copying $script...${NC}"
+            scp -i "$ssh_key" -o StrictHostKeyChecking=no "$script" ubuntu@"$bastion_ip":/home/ubuntu/
+            ssh -i "$ssh_key" ubuntu@"$bastion_ip" -o StrictHostKeyChecking=no "chmod +x /home/ubuntu/$script"
+        else
+            echo -e "${YELLOW}   ⚠️  $script not found, skipping...${NC}"
+        fi
+    done
+    
+    echo -e "${GREEN}✅ Installation scripts copied successfully!${NC}"
+}
+
 # Function to verify files
 verify_files() {
     local bastion_ip=$(cat ./infra-output/bastion-public-ip)
@@ -155,6 +184,9 @@ main() {
     # Copy credentials
     copy_credentials
     
+    # Copy installation scripts
+    copy_installation_scripts
+    
     # Verify files
     verify_files
     
@@ -165,9 +197,10 @@ main() {
     echo -e "${GREEN}🎉 Credential copy completed successfully!${NC}"
     echo ""
     echo -e "${BLUE}📋 Next steps:${NC}"
-    echo "   1. Run 02-setup-mirror-registry.sh to set up the local registry"
-    echo "   2. Run 03-sync-images.sh to sync OpenShift images"
-    echo "   3. Run 04-prepare-install-config.sh to prepare installation"
+    echo "   1. SSH to bastion host: ssh -i ./infra-output/bastion-key.pem ubuntu@$(cat ./infra-output/bastion-public-ip)"
+    echo "   2. Run 02-setup-mirror-registry.sh to set up the local registry"
+    echo "   3. Run 03-sync-images.sh to sync OpenShift images"
+    echo "   4. Run 04-prepare-install-config.sh to prepare installation"
     echo ""
     echo -e "${YELLOW}⚠️  Security note:${NC}"
     echo "   - Credentials are copied to bastion host for installation use"
