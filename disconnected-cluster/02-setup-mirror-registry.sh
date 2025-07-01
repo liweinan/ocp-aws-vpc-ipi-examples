@@ -158,16 +158,16 @@ rm -f $registry_storage/certs/domain.csr
 
 # Stop existing registry if running
 echo "🛑 Stopping existing registry if running..."
-docker stop mirror-registry 2>/dev/null || true
-docker rm mirror-registry 2>/dev/null || true
+podman stop mirror-registry 2>/dev/null || true
+podman rm mirror-registry 2>/dev/null || true
 
 # Start registry with authentication and TLS
 echo "🚀 Starting mirror registry..."
-docker run -d \\
+podman run -d \\
     --name mirror-registry \\
     --restart=always \\
     -p $registry_port:5000 \\
-    -v $registry_storage:/var/lib/registry:z \\
+    -v $registry_storage/data:/var/lib/registry:z \\
     -v $registry_storage/auth:/auth:z \\
     -v $registry_storage/certs:/certs:z \\
     -e REGISTRY_AUTH=htpasswd \\
@@ -313,11 +313,11 @@ EOF
     
     # Copy setup script to bastion
     echo "📤 Copying setup script to bastion host..."
-    scp -i "$ssh_key" -o StrictHostKeyChecking=no "$setup_script" "ec2-user@$bastion_ip:/tmp/setup-registry.sh"
+    scp -i "$ssh_key" -o StrictHostKeyChecking=no "$setup_script" "ubuntu@$bastion_ip:/tmp/setup-registry.sh"
     
     # Execute setup script on bastion
     echo "🚀 Executing setup script on bastion host..."
-    ssh -i "$ssh_key" -o StrictHostKeyChecking=no "ec2-user@$bastion_ip" "chmod +x /tmp/setup-registry.sh && /tmp/setup-registry.sh"
+    ssh -i "$ssh_key" -o StrictHostKeyChecking=no "ubuntu@$bastion_ip" "chmod +x /tmp/setup-registry.sh && /tmp/setup-registry.sh"
     
     # Clean up local script
     rm -f "$setup_script"

@@ -13,7 +13,7 @@ DEFAULT_REGISTRY_PORT="5000"
 DEFAULT_REGISTRY_USER="admin"
 DEFAULT_REGISTRY_PASSWORD="admin123"
 DEFAULT_DRY_RUN="no"
-DEFAULT_BASTION_KEY="~/.ssh/id_rsa"
+DEFAULT_BASTION_KEY="./infra-output/bastion-key.pem"
 
 # Function to display usage
 usage() {
@@ -102,6 +102,50 @@ test_bastion_connectivity() {
     fi
     
     echo "✅ Bastion host connectivity confirmed"
+}
+
+# Function to check and fix registry status
+check_and_fix_registry() {
+    local bastion_ip="$1"
+    local bastion_key="$2"
+    local registry_port="$3"
+    local registry_user="$4"
+    local registry_password="$5"
+    
+    echo "🔍 Checking registry status..."
+    
+    # Check if registry container is running
+    local registry_status=$(ssh -o StrictHostKeyChecking=no -i "$bastion_key" ubuntu@"$bastion_ip" "sudo podman ps --format 'table {{.Names}}\t{{.Status}}' | grep mirror-registry || echo 'NOT_FOUND'")
+    
+    if [[ "$registry_status" == "NOT_FOUND" ]] || [[ "$registry_status" == *"Exited"* ]]; then
+        echo "⚠️  Registry container is not running, attempting to fix..."
+        
+        # Check if certificates exist
+        local cert_status=$(ssh -o StrictHostKeyChecking=no -i "$bastion_key" ubuntu@"$bastion_ip" "sudo ls -la /opt/registry/certs/domain.crt 2>/dev/null || echo 'MISSING'")
+        
+        if [[ "$cert_status" == "MISSING" ]]; then
+            echo "   Generating missing certificates..."
+            ssh -o StrictHostKeyChecking=no -i "$bastion_key" ubuntu@"$bastion_ip" "cd /opt/registry/certs && sudo openssl x509 -req -in domain.csr -signkey domain.key -out domain.crt -days 365 -extensions v3_req -extfile openssl.conf"
+        fi
+        
+        # Start registry container
+        echo "   Starting registry container..."
+        ssh -o StrictHostKeyChecking=no -i "$bastion_key" ubuntu@"$bastion_ip" "sudo podman rm -f mirror-registry 2>/dev/null || true && sudo podman run -d --name mirror-registry -p ${registry_port}:5000 -v /opt/registry/data:/var/lib/registry:z -v /opt/registry/auth:/auth:z -v /opt/registry/certs:/certs:z -e REGISTRY_AUTH=htpasswd -e REGISTRY_AUTH_HTPASSWD_REALM=Registry -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/domain.crt -e REGISTRY_HTTP_TLS_KEY=/certs/domain.key --restart=always registry:2"
+        
+        # Wait for registry to start
+        echo "   Waiting for registry to start..."
+        sleep 10
+    fi
+    
+    # Test registry access
+    echo "🧪 Testing registry access..."
+    if ! ssh -o StrictHostKeyChecking=no -i "$bastion_key" ubuntu@"$bastion_ip" "curl -k -u ${registry_user}:${registry_password} https://localhost:${registry_port}/v2/_catalog" >/dev/null 2>&1; then
+        echo "❌ Registry is not accessible"
+        echo "   Please check registry logs: ssh -i $bastion_key ubuntu@$bastion_ip 'sudo podman logs mirror-registry'"
+        return 1
+    fi
+    
+    echo "✅ Registry is running and accessible"
 }
 
 # Function to create sync script for bastion
@@ -536,6 +580,9 @@ main() {
     
     # Test bastion connectivity
     test_bastion_connectivity "$BASTION_IP" "$BASTION_KEY"
+    
+    # Check and fix registry status
+    check_and_fix_registry "$BASTION_IP" "$BASTION_KEY" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"
     
     # Create sync script for bastion
     create_bastion_sync_script "$OPENSHIFT_VERSION" "$CLUSTER_NAME" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"
