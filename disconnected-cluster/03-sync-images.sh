@@ -1,13 +1,14 @@
 #!/bin/bash
 
 # Image Synchronization Script for Disconnected OpenShift Cluster
+# This script downloads core OpenShift resources directly from the release server
 # This script must be run directly on the bastion host
 
 set -euo pipefail
 
 # Default values
 DEFAULT_CLUSTER_NAME="disconnected-cluster"
-DEFAULT_OPENSHIFT_VERSION="4.18.15"
+DEFAULT_OPENSHIFT_VERSION="4.19.2"
 DEFAULT_REGISTRY_PORT="5000"
 DEFAULT_REGISTRY_USER="admin"
 DEFAULT_REGISTRY_PASSWORD="admin123"
@@ -33,8 +34,8 @@ usage() {
     echo "  --help                Display this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 --cluster-name my-disconnected-cluster --openshift-version 4.18.15"
-    echo "  $0 --dry-run --openshift-version 4.19.0"
+    echo "  $0 --cluster-name my-disconnected-cluster --openshift-version 4.19.2"
+    echo "  $0 --dry-run --openshift-version 4.19.2"
     echo ""
     echo "Note: This script must be run directly on the bastion host"
     exit 1
@@ -63,7 +64,7 @@ check_prerequisites() {
     # Check required tools
     local missing_tools=()
     
-    for tool in jq curl; do
+    for tool in jq curl wget; do
         if ! command -v "$tool" &> /dev/null; then
             missing_tools+=("$tool")
         fi
@@ -106,33 +107,59 @@ check_registry_status() {
     echo -e "${GREEN}✅ Registry is running and accessible${NC}"
 }
 
-# Function to install OpenShift CLI
-install_openshift_cli() {
+# Function to download OpenShift CLI
+download_openshift_cli() {
     local openshift_version="$1"
     
-    echo -e "${BLUE}📦 Installing OpenShift CLI...${NC}"
+    echo -e "${BLUE}📦 Downloading OpenShift CLI...${NC}"
     
     if ! command -v oc &> /dev/null; then
         echo "   Downloading OpenShift CLI version ${openshift_version}..."
-        curl -L "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${openshift_version}/openshift-client-linux.tar.gz" | tar xz
+        # Remove existing files to avoid conflicts
+        rm -f openshift-client-linux.tar.gz
+        rm -f oc kubectl
+        wget -O openshift-client-linux.tar.gz "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${openshift_version}/openshift-client-linux.tar.gz"
+        tar xzf openshift-client-linux.tar.gz
         sudo mv oc kubectl /usr/local/bin/
-        echo -e "${GREEN}✅ OpenShift CLI installed${NC}"
+        rm openshift-client-linux.tar.gz
+        echo -e "${GREEN}✅ OpenShift CLI downloaded and installed${NC}"
     else
         echo -e "${GREEN}✅ OpenShift CLI already installed${NC}"
     fi
 }
 
-# Function to sync OpenShift release images
-sync_release_images() {
+# Function to download OpenShift installer
+download_openshift_installer() {
+    local openshift_version="$1"
+    
+    echo -e "${BLUE}📦 Downloading OpenShift installer...${NC}"
+    
+    if ! command -v openshift-install &> /dev/null; then
+        echo "   Downloading OpenShift installer version ${openshift_version}..."
+        # Remove existing files to avoid conflicts
+        rm -f openshift-install-linux.tar.gz
+        rm -rf openshift-install
+        wget -O openshift-install-linux.tar.gz "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${openshift_version}/openshift-install-linux.tar.gz"
+        tar xzf openshift-install-linux.tar.gz
+        sudo mv openshift-install /usr/local/bin/
+        rm openshift-install-linux.tar.gz
+        echo -e "${GREEN}✅ OpenShift installer downloaded and installed${NC}"
+    else
+        echo -e "${GREEN}✅ OpenShift installer already installed${NC}"
+    fi
+}
+
+# Function to download core OpenShift images
+download_core_images() {
     local openshift_version="$1"
     local cluster_name="$2"
     local registry_port="$3"
     local registry_user="$4"
     local registry_password="$5"
     
-    echo -e "${BLUE}🔄 Syncing OpenShift release images...${NC}"
+    echo -e "${BLUE}🔄 Downloading core OpenShift images...${NC}"
     
-    local registry_url="registry.${cluster_name}.local:${registry_port}"
+    local registry_url="localhost:${registry_port}"
     local sync_dir="/home/ubuntu/openshift-sync"
     
     # Create sync directory
@@ -141,52 +168,89 @@ sync_release_images() {
     
     # Login to registry
     echo "   Logging into registry..."
-    podman login --username "${registry_user}" --password "${registry_password}" --tls-verify=false "localhost:${registry_port}"
+    podman login --username "${registry_user}" --password "${registry_password}" --tls-verify=false "${registry_url}"
     
-    # Download release info
-    echo "   Downloading release info..."
-    oc adm release mirror \
-        --from=quay.io/openshift-release-dev/ocp-release:${openshift_version}-x86_64 \
-        --to-dir=./mirror \
-        --to=localhost:${registry_port}/openshift/release
+    # List of core OpenShift images to sync from quay.io (publicly accessible)
+    local core_images=(
+        "quay.io/openshift-release-dev/ocp-release:${openshift_version}-x86_64"
+    )
     
-    # Mirror images to registry
-    echo "   Mirroring images to registry..."
-    oc image mirror \
-        --from-dir=./mirror \
-        "file://openshift/release:${openshift_version}-x86_64*" \
-        "localhost:${registry_port}/openshift/release:${openshift_version}-x86_64"
+    for image in "${core_images[@]}"; do
+        echo "   Processing image: ${image}"
+        
+        # Extract image name and tag for local registry
+        local image_name=$(echo "$image" | sed 's|quay.io/openshift-release-dev/||' | sed 's|:.*||')
+        local image_tag=$(echo "$image" | sed 's|.*:||')
+        
+        local local_image="${registry_url}/openshift/${image_name}:${image_tag}"
+        
+        echo "   Pulling ${image}..."
+        if podman pull "$image"; then
+            echo "   Tagging as ${local_image}..."
+            podman tag "$image" "$local_image"
+            
+            echo "   Pushing to local registry..."
+            if podman push "$local_image" --tls-verify=false; then
+                echo -e "${GREEN}   ✅ Successfully synced ${local_image}${NC}"
+            else
+                echo -e "${YELLOW}   ⚠️  Failed to push ${local_image}${NC}"
+            fi
+        else
+            echo -e "${YELLOW}   ⚠️  Failed to pull ${image} - skipping${NC}"
+        fi
+        
+        echo
+    done
     
-    echo -e "${GREEN}✅ Release images synced${NC}"
+    echo -e "${GREEN}✅ Core images downloaded and pushed to registry${NC}"
 }
 
-# Function to sync additional operators
-sync_additional_operators() {
+# Function to download additional required images
+download_additional_images() {
     local cluster_name="$1"
     local registry_port="$2"
     local registry_user="$3"
     local registry_password="$4"
     
-    echo -e "${BLUE}🔄 Syncing additional operators...${NC}"
+    echo -e "${BLUE}🔄 Downloading additional required images...${NC}"
     
-    local registry_url="registry.${cluster_name}.local:${registry_port}"
+    local registry_url="localhost:${registry_port}"
     
-    # Sync essential operators
-    local operators=(
-        "openshift/ose-cli:latest"
-        "openshift/ose-cli:4.18"
-        "openshift/ose-installer:4.18"
-        "openshift/ose-installer:latest"
+    # List of additional useful images (optional - these may require authentication)
+    local additional_images=(
+        "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:1293f5ccad2a2776241344faecaf7320f60ee91882df4e24b309f3a7cefc04be"
     )
     
-    for operator in "${operators[@]}"; do
-        echo "   Syncing ${operator}..."
-        podman pull "quay.io/${operator}"
-        podman tag "quay.io/${operator}" "localhost:${registry_port}/${operator}"
-        podman push "localhost:${registry_port}/${operator}"
+    echo "   Note: Additional images may require authentication and are optional for basic installation"
+    
+    for image in "${additional_images[@]}"; do
+        echo "   Processing ${image}..."
+        
+        # Extract image name and tag for local registry
+        local image_name=$(echo "$image" | sed 's|quay.io/openshift-release-dev/||' | sed 's|@.*||')
+        local image_tag="latest"
+        
+        # If it's a digest, use a descriptive tag
+        if [[ "$image" == *"@sha256:"* ]]; then
+            image_tag="sha256-$(echo "$image" | sed 's|.*@sha256:||' | cut -c1-8)"
+        fi
+        
+        local local_image="${registry_url}/openshift/${image_name}:${image_tag}"
+        
+        # Try to pull and push to local registry
+        if podman pull "$image" 2>/dev/null; then
+            podman tag "$image" "$local_image"
+            if podman push "$local_image" --tls-verify=false 2>/dev/null; then
+                echo -e "${GREEN}   ✅ ${image} synced${NC}"
+            else
+                echo -e "${YELLOW}   ⚠️  Failed to push ${local_image}${NC}"
+            fi
+        else
+            echo -e "${YELLOW}   ⚠️  Could not pull ${image} (requires authentication)${NC}"
+        fi
     done
     
-    echo -e "${GREEN}✅ Additional operators synced${NC}"
+    echo -e "${GREEN}✅ Additional images processed${NC}"
 }
 
 # Function to verify sync results
@@ -199,22 +263,37 @@ verify_sync_results() {
     echo -e "${BLUE}🔍 Verifying sync results...${NC}"
     
     # List images in registry
-    echo "   Images in registry:"
-    curl -k -s -u "${registry_user}:${registry_password}" "https://localhost:${registry_port}/v2/_catalog" | jq .
+    echo "   Registry catalog:"
+    local catalog=$(curl -k -s -u "${registry_user}:${registry_password}" "https://localhost:${registry_port}/v2/_catalog")
+    echo "$catalog" | jq .
     
-    # Check specific images
+    # Check specific images and their tags
     local required_images=(
         "openshift/release"
     )
     
     for image in "${required_images[@]}"; do
         echo "   Checking ${image}..."
-        if curl -k -s -u "${registry_user}:${registry_password}" "https://localhost:${registry_port}/v2/${image}/tags/list" >/dev/null 2>&1; then
-            echo -e "${GREEN}   ✅ ${image} found${NC}"
+        local tags_response=$(curl -k -s -u "${registry_user}:${registry_password}" "https://localhost:${registry_port}/v2/${image}/tags/list")
+        if echo "$tags_response" | jq -e '.tags' >/dev/null 2>&1; then
+            local tags=$(echo "$tags_response" | jq -r '.tags[]' 2>/dev/null)
+            if [ -n "$tags" ]; then
+                echo -e "${GREEN}   ✅ ${image} found with tags: $tags${NC}"
+            else
+                echo -e "${GREEN}   ✅ ${image} found (no tags)${NC}"
+            fi
         else
             echo -e "${RED}   ❌ ${image} not found${NC}"
         fi
     done
+    
+    # Test pulling an image from local registry
+    echo "   Testing image pull from local registry..."
+    if podman pull "localhost:${registry_port}/openshift/release:latest" --tls-verify=false 2>/dev/null; then
+        echo -e "${GREEN}   ✅ Successfully pulled image from local registry${NC}"
+    else
+        echo -e "${YELLOW}   ⚠️  Could not pull image from local registry${NC}"
+    fi
     
     echo -e "${GREEN}✅ Sync verification completed${NC}"
 }
@@ -234,24 +313,29 @@ create_sync_summary() {
 
 Cluster Name: ${cluster_name}
 OpenShift Version: ${openshift_version}
-Registry URL: registry.${cluster_name}.local:${registry_port}
+Registry URL: localhost:${registry_port}
 Sync Directory: ${sync_dir}
 
 ## Synced Images:
 $(curl -k -s -u admin:admin123 "https://localhost:${registry_port}/v2/_catalog" | jq -r '.repositories[]' | sort)
 
 ## Registry Access:
-- HTTPS: https://registry.${cluster_name}.local:${registry_port}
-- Docker: registry.${cluster_name}.local:${registry_port}
-- Local: https://localhost:${registry_port}
+- HTTPS: https://localhost:${registry_port}
+- Docker: localhost:${registry_port}
+
+## Downloaded Tools:
+- OpenShift CLI (oc)
+- OpenShift Installer (openshift-install)
 
 ## Next Steps:
-1. Run: ./04-prepare-install-config.sh to prepare installation
+1. Run: ./04-prepare-install-config.sh to prepare installation configuration
 2. Run: ./05-install-cluster.sh to install the cluster
 
 ## Verification Commands:
 - List images: curl -k -u admin:admin123 https://localhost:${registry_port}/v2/_catalog
 - Login: podman login --username admin --password admin123 --tls-verify=false localhost:${registry_port}
+- Check CLI: oc version
+- Check installer: openshift-install version
 EOF
     
     echo -e "${GREEN}✅ Sync summary created: /home/ubuntu/sync-summary.txt${NC}"
@@ -319,10 +403,11 @@ main() {
     if [[ "$DRY_RUN" == "yes" ]]; then
         echo -e "${BLUE}🔍 DRY RUN MODE - No images will be synced${NC}"
         echo ""
-        echo "Would sync:"
-        echo "  - OpenShift release images (version $OPENSHIFT_VERSION)"
-        echo "  - Essential operators and tools"
-        echo "  - Images to registry: registry.$CLUSTER_NAME.local:$REGISTRY_PORT"
+        echo "Would download:"
+        echo "  - OpenShift CLI and installer"
+        echo "  - Core OpenShift release images (version $OPENSHIFT_VERSION)"
+        echo "  - Essential operator images"
+        echo "  - Push to registry: localhost:$REGISTRY_PORT"
         echo ""
         echo "To actually sync images, run without --dry-run"
         exit 0
@@ -334,14 +419,17 @@ main() {
     # Check registry status
     check_registry_status "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"
     
-    # Install OpenShift CLI
-    install_openshift_cli "$OPENSHIFT_VERSION"
+    # Download OpenShift CLI
+    download_openshift_cli "$OPENSHIFT_VERSION"
     
-    # Sync OpenShift release images
-    sync_release_images "$OPENSHIFT_VERSION" "$CLUSTER_NAME" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"
+    # Download OpenShift installer
+    download_openshift_installer "$OPENSHIFT_VERSION"
     
-    # Sync additional operators
-    sync_additional_operators "$CLUSTER_NAME" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"
+    # Download core OpenShift images
+    download_core_images "$OPENSHIFT_VERSION" "$CLUSTER_NAME" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"
+    
+    # Download additional required images
+    download_additional_images "$CLUSTER_NAME" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"
     
     # Verify sync results
     verify_sync_results "$CLUSTER_NAME" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"
@@ -357,17 +445,16 @@ main() {
     echo "   /home/ubuntu/sync-summary.txt: Sync summary"
     echo ""
     echo -e "${BLUE}🔗 Registry access:${NC}"
-    echo "   HTTPS: https://registry.$CLUSTER_NAME.local:$REGISTRY_PORT"
-    echo "   Docker: registry.$CLUSTER_NAME.local:$REGISTRY_PORT"
-    echo "   Local: https://localhost:$REGISTRY_PORT"
+    echo "   HTTPS: https://localhost:$REGISTRY_PORT"
+    echo "   Docker: localhost:$REGISTRY_PORT"
     echo ""
     echo -e "${BLUE}📝 Next steps:${NC}"
-    echo "1. Run: ./04-prepare-install-config.sh to prepare installation"
+    echo "1. Run: ./04-prepare-install-config.sh to prepare installation configuration"
     echo "2. Run: ./05-install-cluster.sh to install the cluster"
     echo ""
     echo -e "${BLUE}📊 Sync information:${NC}"
     echo "   OpenShift Version: $OPENSHIFT_VERSION"
-    echo "   Registry URL: registry.$CLUSTER_NAME.local:$REGISTRY_PORT"
+    echo "   Registry URL: localhost:$REGISTRY_PORT"
     echo "   Registry User: $REGISTRY_USER"
     echo "   Sync Directory: /home/ubuntu/openshift-sync"
 }
