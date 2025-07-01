@@ -166,21 +166,26 @@ get_ssh_key() {
 # Function to get pull secret
 get_pull_secret() {
     local pull_secret_input="$1"
+    local cluster_name="$2"
+    local registry_port="$3"
+    local registry_user="$4"
+    local registry_password="$5"
     
     if [[ -z "$pull_secret_input" ]]; then
-        echo "❌ Pull secret is required"
-        echo "Please provide a pull secret using --pull-secret"
-        echo "You can get it from: https://console.redhat.com/openshift/install/pull-secret"
-        exit 1
-    fi
-    
-    # Check if it's a file
-    if [[ -f "$pull_secret_input" ]]; then
-        local pull_secret_content=$(cat "$pull_secret_input")
+        # Auto-generate pull secret for local registry
+        echo "📝 Auto-generating pull secret for local registry..."
+        local auth_string=$(echo -n "${registry_user}:${registry_password}" | base64)
+        local pull_secret_content="{\"auths\":{\"registry.${cluster_name}.local:${registry_port}\":{\"auth\":\"${auth_string}\"}}}"
         echo "$pull_secret_content"
     else
-        # Assume it's the content directly
-        echo "$pull_secret_input"
+        # Check if it's a file
+        if [[ -f "$pull_secret_input" ]]; then
+            local pull_secret_content=$(cat "$pull_secret_input")
+            echo "$pull_secret_content"
+        else
+            # Assume it's the content directly
+            echo "$pull_secret_input"
+        fi
     fi
 }
 
@@ -786,11 +791,22 @@ main() {
     local private_subnet_ids=$(cat "$INFRA_OUTPUT_DIR/private-subnet-ids")
     local region=$(cat "$INFRA_OUTPUT_DIR/region")
     
+    # Auto-detect registry information from infrastructure
+    echo "🔍 Auto-detecting registry information from infrastructure..."
+    if [[ -f "$INFRA_OUTPUT_DIR/bastion-public-ip" ]]; then
+        echo "   ✅ Found bastion host information"
+    fi
+    
+    # Registry information is already set from defaults or command line
+    echo "   Registry Port: $REGISTRY_PORT"
+    echo "   Registry User: $REGISTRY_USER"
+    echo "   Registry Password: $REGISTRY_PASSWORD"
+    
     # Get SSH key
     local ssh_key_content=$(get_ssh_key "$SSH_KEY")
     
     # Get pull secret
-    local pull_secret_content=$(get_pull_secret "$PULL_SECRET")
+    local pull_secret_content=$(get_pull_secret "$PULL_SECRET" "$CLUSTER_NAME" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD")
     
     # Check if we should copy to bastion or run locally
     if [[ "$COPY_TO_BASTION" == "yes" ]]; then
