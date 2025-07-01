@@ -119,8 +119,8 @@ test_aws_access() {
     
     echo -e "${BLUE}🧪 Testing AWS access on bastion host...${NC}"
     
-    # Test AWS CLI access
-    local aws_test=$(ssh -i "$ssh_key" ubuntu@"$bastion_ip" -o StrictHostKeyChecking=no "aws sts get-caller-identity --query 'Arn' --output text 2>/dev/null || echo 'FAILED'")
+    # Test AWS CLI access with static profile
+    local aws_test=$(ssh -i "$ssh_key" ubuntu@"$bastion_ip" -o StrictHostKeyChecking=no "AWS_PROFILE=static aws sts get-caller-identity --query 'Arn' --output text 2>/dev/null || echo 'FAILED'")
     
     if [[ "$aws_test" != "FAILED" ]]; then
         echo -e "${GREEN}✅ AWS access working: $aws_test${NC}"
