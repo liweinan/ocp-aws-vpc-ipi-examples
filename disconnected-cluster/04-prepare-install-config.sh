@@ -50,6 +50,7 @@ usage() {
     echo "  $0 --ssh-key ~/.ssh/id_ed25519.pub"
     echo ""
     echo "Note: This script must be run on the bastion host"
+    echo "      Cluster will be configured as SNO (Single Node OpenShift) mode"
     exit 1
 }
 
@@ -164,7 +165,7 @@ compute:
   platform:
     aws:
       type: m5.xlarge
-  replicas: 3
+  replicas: 0
 controlPlane:
   architecture: amd64
   hyperthreading: Enabled
@@ -172,7 +173,7 @@ controlPlane:
   platform:
     aws:
       type: m5.xlarge
-  replicas: 3
+  replicas: 1
 metadata:
   name: $cluster_name
 networking:
@@ -387,9 +388,10 @@ main() {
         echo "   ./openshift-install create cluster --log-level=info"
         echo ""
         echo -e "${YELLOW}📝 Important notes:${NC}"
-        echo "   - Cluster will be installed in disconnected mode"
+        echo "   - Cluster will be installed in SNO (Single Node OpenShift) mode"
+        echo "   - 1 master node, 0 worker nodes for simplified deployment"
         echo "   - All images will be pulled from local registry"
-        echo "   - Installation may take 30-45 minutes"
+        echo "   - Installation may take 20-30 minutes (faster than multi-node)"
         echo "   - Check logs for any issues during installation"
     else
         echo -e "${RED}❌ This script must be run on the bastion host${NC}"

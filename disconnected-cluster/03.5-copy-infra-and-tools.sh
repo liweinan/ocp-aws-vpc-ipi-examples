@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 03.5-copy-infra-and-tools.sh
-# 在 03-04 步之间运行，将 infra-output 和 04-prepare-install-config.sh 拷贝到 bastion host，并安装依赖工具
+# 在 03-04 步之间运行，将 infra-output 和后续安装脚本拷贝到 bastion host，并安装依赖工具
 
 set -euo pipefail
 
@@ -18,9 +18,11 @@ NC='\033[0m'
 printf "${BLUE}📦 拷贝 infra-output 到 bastion...${NC}\n"
 scp -i "$SSH_KEY" -o StrictHostKeyChecking=no -r ./infra-output ubuntu@"$BASTION_IP":/home/ubuntu/
 
-# 2. 拷贝 04-prepare-install-config.sh
-printf "${BLUE}📦 拷贝 04-prepare-install-config.sh 到 bastion...${NC}\n"
+# 2. 拷贝安装相关脚本到 bastion
+printf "${BLUE}📦 拷贝安装相关脚本到 bastion...${NC}\n"
 scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./04-prepare-install-config.sh ubuntu@"$BASTION_IP":/home/ubuntu/
+scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./05-install-cluster.sh ubuntu@"$BASTION_IP":/home/ubuntu/ 2>/dev/null || echo "05-install-cluster.sh not found, skipping..."
+scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./06-verify-cluster.sh ubuntu@"$BASTION_IP":/home/ubuntu/ 2>/dev/null || echo "06-verify-cluster.sh not found, skipping..."
 
 # 3. 在 bastion host 上安装依赖工具
 echo -e "${BLUE}🔧 在 bastion host 上安装依赖工具...${NC}"
@@ -49,4 +51,7 @@ ssh -i "$SSH_KEY" ubuntu@"$BASTION_IP" -o StrictHostKeyChecking=no '
   tar --version | head -n1 || true
 '
 
-printf "${GREEN}✅ 所有内容和依赖已准备好，可在 bastion host 上执行 04-prepare-install-config.sh${NC}\n" 
+printf "${GREEN}✅ 所有内容和依赖已准备好，可在 bastion host 上执行后续步骤：${NC}\n"
+printf "${GREEN}   - 04-prepare-install-config.sh (准备安装配置)${NC}\n"
+printf "${GREEN}   - 05-install-cluster.sh (安装集群)${NC}\n"
+printf "${GREEN}   - 06-verify-cluster.sh (验证集群)${NC}\n" 
