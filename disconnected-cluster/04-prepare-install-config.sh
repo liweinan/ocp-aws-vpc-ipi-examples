@@ -2,6 +2,7 @@
 
 # Install Config Preparation Script for Disconnected OpenShift Cluster
 # Generates install-config.yaml for disconnected cluster installation
+# This script runs on the bastion host
 
 set -euo pipefail
 
@@ -169,7 +170,7 @@ fi
 EOF
     
     # Execute script on bastion host
-    local cert_content=$(ssh -i "$ssh_key" -o StrictHostKeyChecking=no "ec2-user@$bastion_ip" "bash -s" < "$temp_script")
+    local cert_content=$(ssh -i "$ssh_key" -o StrictHostKeyChecking=no "ubuntu@$bastion_ip" "bash -s" < "$temp_script")
     
     # Clean up
     rm -f "$temp_script"
@@ -428,6 +429,192 @@ EOF
     echo "✅ Helper scripts created"
 }
 
+# Function to create installation script for bastion host
+create_bastion_install_script() {
+    local cluster_name="$1"
+    local base_domain="$2"
+    local region="$3"
+    local vpc_id="$4"
+    local private_subnet_ids="$5"
+    local registry_port="$6"
+    local registry_user="$7"
+    local registry_password="$8"
+    local ssh_key_content="$9"
+    local pull_secret_content="${10}"
+    local openshift_version="${11}"
+    
+    echo "📝 Creating installation script for bastion host..."
+    
+    cat > /tmp/prepare-install-config-on-bastion.sh <<'BASTION_SCRIPT_EOF'
+#!/bin/bash
+# Install Config Preparation Script for Disconnected OpenShift Cluster
+# This script runs on the bastion host
+
+set -euo pipefail
+
+CLUSTER_NAME="$1"
+BASE_DOMAIN="$2"
+REGION="$3"
+VPC_ID="$4"
+PRIVATE_SUBNET_IDS="$5"
+REGISTRY_PORT="$6"
+REGISTRY_USER="$7"
+REGISTRY_PASSWORD="$8"
+SSH_KEY_CONTENT="$9"
+PULL_SECRET_CONTENT="${10}"
+OPENSHIFT_VERSION="${11}"
+
+echo "🔧 Preparing install-config.yaml on bastion host..."
+echo "=================================================="
+echo ""
+echo "📋 Configuration:"
+echo "   Cluster Name: $CLUSTER_NAME"
+echo "   Base Domain: $BASE_DOMAIN"
+echo "   Region: $REGION"
+echo "   Registry: registry.$CLUSTER_NAME.local:$REGISTRY_PORT"
+echo ""
+
+# Create installation directory
+INSTALL_DIR="/home/ubuntu/openshift-install"
+mkdir -p "$INSTALL_DIR"
+cd "$INSTALL_DIR"
+
+# Get registry certificate
+echo "📥 Getting registry certificate..."
+REGISTRY_CERT=$(sudo cat /opt/registry/certs/domain.crt)
+
+# Create install-config.yaml
+echo "📝 Creating install-config.yaml..."
+cat > install-config.yaml <<EOF
+apiVersion: v1
+baseDomain: $BASE_DOMAIN
+compute:
+- architecture: amd64
+  hyperthreading: Enabled
+  name: worker
+  platform:
+    aws:
+      type: m5.xlarge
+  replicas: 3
+controlPlane:
+  architecture: amd64
+  hyperthreading: Enabled
+  name: master
+  platform:
+    aws:
+      type: m5.xlarge
+  replicas: 3
+metadata:
+  name: $CLUSTER_NAME
+networking:
+  clusterNetwork:
+  - cidr: 10.128.0.0/14
+    hostPrefix: 23
+  machineNetwork:
+  - cidr: 10.0.0.0/16
+  networkType: OpenShiftSDN
+  serviceNetwork:
+  - 172.30.0.0/16
+platform:
+  aws:
+    region: $REGION
+    subnets:
+EOF
+
+# Add private subnet IDs
+for subnet_id in $(echo "$PRIVATE_SUBNET_IDS" | tr ',' ' '); do
+    echo "    - $subnet_id" >> install-config.yaml
+done
+
+# Continue with the rest of the config
+cat >> install-config.yaml <<EOF
+    vpc: $VPC_ID
+publish: Internal
+pullSecret: '$PULL_SECRET_CONTENT'
+sshKey: |
+$SSH_KEY_CONTENT
+additionalTrustBundle: |
+$REGISTRY_CERT
+imageContentSources:
+- mirrors:
+  - registry.$CLUSTER_NAME.local:$REGISTRY_PORT/openshift/release
+  source: quay.io/openshift-release-dev/ocp-release
+- mirrors:
+  - registry.$CLUSTER_NAME.local:$REGISTRY_PORT/openshift/release
+  source: quay.io/openshift-release-dev/ocp-v4.0-art-dev
+EOF
+
+echo "✅ install-config.yaml created"
+
+# Download OpenShift installer if not present
+if [[ ! -f "./openshift-install" ]]; then
+    echo "📥 Downloading OpenShift installer..."
+    curl -L "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${OPENSHIFT_VERSION}/openshift-install-linux.tar.gz" | tar xz
+    chmod +x openshift-install
+fi
+
+# Validate install-config.yaml
+echo "🔍 Validating install-config.yaml..."
+./openshift-install create install-config --dir=. --dry-run
+
+echo ""
+echo "✅ Install config preparation completed!"
+echo ""
+echo "📁 Files created in: $INSTALL_DIR"
+echo "   install-config.yaml: Installation configuration"
+echo "   openshift-install: OpenShift installer binary"
+echo ""
+echo "🚀 Next steps:"
+echo "1. Review install-config.yaml and customize if needed"
+echo "2. Run: ./openshift-install create cluster --log-level=info"
+echo "3. Monitor installation progress"
+echo ""
+echo "📝 Important notes:"
+echo "   - Cluster will be installed in disconnected mode"
+echo "   - All images will be pulled from local registry"
+echo "   - Installation may take 30-45 minutes"
+echo "   - Check logs for any issues during installation"
+BASTION_SCRIPT_EOF
+
+    chmod +x /tmp/prepare-install-config-on-bastion.sh
+    echo "✅ Installation script created"
+}
+
+# Function to execute installation script on bastion
+execute_install_on_bastion() {
+    local bastion_ip="$1"
+    local bastion_key="$2"
+    local cluster_name="$3"
+    local base_domain="$4"
+    local region="$5"
+    local vpc_id="$6"
+    local private_subnet_ids="$7"
+    local registry_port="$8"
+    local registry_user="$9"
+    local registry_password="${10}"
+    local ssh_key_content="${11}"
+    local pull_secret_content="${12}"
+    local openshift_version="${13}"
+    
+    echo "🚀 Copying installation script to bastion host..."
+    scp -i "$bastion_key" -o StrictHostKeyChecking=no /tmp/prepare-install-config-on-bastion.sh "ubuntu@$bastion_ip:/home/ubuntu/"
+    
+    echo "🔧 Executing installation script on bastion host..."
+    ssh -i "$bastion_key" -o StrictHostKeyChecking=no "ubuntu@$bastion_ip" "cd /home/ubuntu && ./prepare-install-config-on-bastion.sh '$cluster_name' '$base_domain' '$region' '$vpc_id' '$private_subnet_ids' '$registry_port' '$registry_user' '$registry_password' '$ssh_key_content' '$pull_secret_content' '$openshift_version'"
+    
+    echo ""
+    echo "✅ Install config preparation completed on bastion host!"
+    echo ""
+    echo "📁 Files created on bastion: /home/ubuntu/openshift-install/"
+    echo "   install-config.yaml: Installation configuration"
+    echo "   openshift-install: OpenShift installer binary"
+    echo ""
+    echo "🔗 To connect to bastion and start installation:"
+    echo "   ssh -i $bastion_key ubuntu@$bastion_ip"
+    echo "   cd /home/ubuntu/openshift-install"
+    echo "   ./openshift-install create cluster --log-level=info"
+}
+
 # Main execution
 main() {
     # Parse command line arguments
@@ -551,14 +738,18 @@ main() {
     # Get pull secret
     local pull_secret_content=$(get_pull_secret "$PULL_SECRET")
     
+    # Get bastion information
+    local bastion_ip=$(cat "$INFRA_OUTPUT_DIR/bastion-public-ip")
+    local bastion_key="$INFRA_OUTPUT_DIR/bastion-key.pem"
+    
     # Get registry certificate
     local registry_cert=$(get_registry_certificate "$CLUSTER_NAME" "$REGISTRY_PORT" "$INFRA_OUTPUT_DIR")
     
-    # Create install-config.yaml
-    create_install_config "$CLUSTER_NAME" "$BASE_DOMAIN" "$region" "$vpc_id" "$private_subnet_ids" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD" "$ssh_key_content" "$pull_secret_content" "$registry_cert" "$INSTALL_DIR"
+    # Create installation script for bastion host
+    create_bastion_install_script "$CLUSTER_NAME" "$BASE_DOMAIN" "$region" "$vpc_id" "$private_subnet_ids" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD" "$ssh_key_content" "$pull_secret_content" "4.18.15"
     
-    # Create backup
-    create_backup "$INSTALL_DIR" "$CLUSTER_NAME"
+    # Execute installation script on bastion host
+    execute_install_on_bastion "$bastion_ip" "$bastion_key" "$CLUSTER_NAME" "$BASE_DOMAIN" "$region" "$vpc_id" "$private_subnet_ids" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD" "$ssh_key_content" "$pull_secret_content" "4.18.15"
     
     # Validate install-config.yaml
     validate_install_config "$INSTALL_DIR"
