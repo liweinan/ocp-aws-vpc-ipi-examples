@@ -127,20 +127,22 @@ check_infrastructure() {
     echo "✅ Infrastructure files found"
 }
 
-# Function to check sync files
+# Function to check sync files (optional for disconnected clusters)
 check_sync_files() {
     local sync_dir="$1"
     
     if [[ ! -d "$sync_dir" ]]; then
-        echo "❌ Sync directory not found: $sync_dir"
-        echo "Please run 03-sync-images.sh first"
-        exit 1
+        echo "⚠️  Sync directory not found: $sync_dir"
+        echo "   This is expected for disconnected clusters - sync files are on bastion host"
+        echo "   Continuing with install config preparation..."
+        return 0
     fi
     
     if [[ ! -f "$sync_dir/install-config-template.yaml" ]]; then
-        echo "❌ Install config template not found: $sync_dir/install-config-template.yaml"
-        echo "Please run 03-sync-images.sh first"
-        exit 1
+        echo "⚠️  Install config template not found: $sync_dir/install-config-template.yaml"
+        echo "   This is expected for disconnected clusters - template is on bastion host"
+        echo "   Continuing with install config preparation..."
+        return 0
     fi
     
     echo "✅ Sync files found"
