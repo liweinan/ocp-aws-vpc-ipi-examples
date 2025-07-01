@@ -105,11 +105,49 @@ sudo dnf install -y httpd-tools
 echo "🔐 Creating registry authentication..."
 htpasswd -bBc $registry_storage/auth/htpasswd $registry_user "$registry_password"
 
-# Create self-signed certificate
-echo "🔒 Creating self-signed certificate..."
-openssl req -newkey rsa:4096 -nodes -sha256 -keyout $registry_storage/certs/domain.key \
-    -x509 -days 365 -out $registry_storage/certs/domain.crt \
-    -subj "/C=US/ST=State/L=City/O=Organization/CN=registry.$cluster_name.local"
+# Create self-signed certificate with multiple SANs
+echo "🔒 Creating self-signed certificate with multiple SANs..."
+cat > $registry_storage/certs/openssl.conf <<EOF
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+C = US
+ST = State
+L = City
+O = Organization
+CN = registry.$cluster_name.local
+
+[v3_req]
+keyUsage = keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = registry.$cluster_name.local
+DNS.2 = *.local
+DNS.3 = localhost
+DNS.4 = registry
+IP.1 = 127.0.0.1
+IP.2 = $bastion_ip
+EOF
+
+openssl req -newkey rsa:4096 -nodes -sha256 \
+    -keyout $registry_storage/certs/domain.key \
+    -out $registry_storage/certs/domain.csr \
+    -config $registry_storage/certs/openssl.conf
+
+openssl x509 -req -in $registry_storage/certs/domain.csr \
+    -signkey $registry_storage/certs/domain.key \
+    -out $registry_storage/certs/domain.crt \
+    -days 365 \
+    -extensions v3_req \
+    -extfile $registry_storage/certs/openssl.conf
+
+# Clean up CSR file
+rm -f $registry_storage/certs/domain.csr
 
 # Stop existing registry if running
 echo "🛑 Stopping existing registry if running..."
