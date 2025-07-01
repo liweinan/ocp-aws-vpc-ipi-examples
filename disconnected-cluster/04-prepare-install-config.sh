@@ -124,13 +124,13 @@ get_infrastructure_info() {
         local region=$(cat "$INFRA_OUTPUT_DIR/region")
         local vpc_id=$(cat "$INFRA_OUTPUT_DIR/vpc-id")
         local private_subnet_ids=$(cat "$INFRA_OUTPUT_DIR/private-subnet-ids")
-        echo -e "$region\n$vpc_id\n$private_subnet_ids"
+        echo "$region $vpc_id $private_subnet_ids"
     else
         local region=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
         local instance_id=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
         local vpc_id=$(aws ec2 describe-instances --instance-ids "$instance_id" --region "$region" --query 'Reservations[0].Instances[0].VpcId' --output text)
         local private_subnet_ids=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpc_id" "Name=tag:kubernetes.io/role/internal-elb,Values=1" --region "$region" --query 'Subnets[].SubnetId' --output text | tr '\t' ',')
-        echo -e "$region\n$vpc_id\n$private_subnet_ids"
+        echo "$region $vpc_id $private_subnet_ids"
     fi
 }
 
