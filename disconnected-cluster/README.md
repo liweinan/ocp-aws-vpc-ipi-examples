@@ -15,17 +15,19 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 整个安装过程分为以下几个步骤：
 
 1. **准备基础设施** - 创建VPC、子网、安全组等
-2. **搭建镜像仓库** - 在bastion host上部署私有镜像仓库
-3. **同步镜像** - 从外部环境同步OpenShift镜像到私有仓库
-4. **配置安装环境** - 准备disconnected cluster的安装配置
-5. **安装集群** - 使用私有镜像仓库安装OpenShift集群
-6. **验证和配置** - 验证集群功能并配置后续使用
+2. **复制凭证** - 将AWS凭证、SSH密钥和pull secret复制到bastion host
+3. **搭建镜像仓库** - 在bastion host上部署私有镜像仓库
+4. **同步镜像** - 从外部环境同步OpenShift镜像到私有仓库
+5. **配置安装环境** - 准备disconnected cluster的安装配置
+6. **安装集群** - 使用私有镜像仓库安装OpenShift集群
+7. **验证和配置** - 验证集群功能并配置后续使用
 
 ## 脚本说明
 
 | 脚本 | 用途 | 说明 |
 |------|------|------|
 | `01-create-infrastructure.sh` | 创建基础设施 | 创建VPC、子网、安全组等基础资源 |
+| `01.5-copy-credentials.sh` | 复制凭证 | 将AWS凭证、SSH密钥和pull secret复制到bastion host |
 | `02-setup-mirror-registry.sh` | 搭建镜像仓库 | 在bastion host上部署私有镜像仓库 |
 | `03-sync-images.sh` | 同步镜像 | 从外部同步OpenShift镜像到私有仓库 |
 | `04-prepare-install-config.sh` | 准备安装配置 | 生成disconnected cluster的安装配置 |
@@ -59,19 +61,22 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 # 1. 创建基础设施
 ./01-create-infrastructure.sh --cluster-name my-disconnected-cluster --region us-east-1
 
-# 2. 搭建镜像仓库
+# 2. 复制凭证到bastion host
+./01.5-copy-credentials.sh
+
+# 3. 搭建镜像仓库
 ./02-setup-mirror-registry.sh --cluster-name my-disconnected-cluster
 
-# 3. 同步镜像（需要网络连接）
+# 4. 同步镜像（需要网络连接）
 ./03-sync-images.sh --cluster-name my-disconnected-cluster --openshift-version 4.18.15
 
-# 4. 准备安装配置
+# 5. 准备安装配置
 ./04-prepare-install-config.sh --cluster-name my-disconnected-cluster --base-domain example.com
 
-# 5. 安装集群
+# 6. 安装集群
 ./05-install-cluster.sh --cluster-name my-disconnected-cluster
 
-# 6. 验证集群
+# 7. 验证集群
 ./06-verify-cluster.sh --cluster-name my-disconnected-cluster
 ```
 
