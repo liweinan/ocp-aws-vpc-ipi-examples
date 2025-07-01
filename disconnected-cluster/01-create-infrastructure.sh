@@ -123,7 +123,28 @@ create_vpc_infrastructure() {
     
     for i in $(seq 1 $public_subnets); do
         local az="${az_array[$((i-1))]}"
-        local subnet_cidr=$(echo "$vpc_cidr" | sed "s|/16|/24|" | sed "s|.0/24|.$((i*10))/24|")
+        
+        # Find available CIDR block for public subnet
+        local subnet_cidr=""
+        local cidr_base=10
+        while [ -z "$subnet_cidr" ]; do
+            local test_cidr=$(echo "$vpc_cidr" | sed "s|/16|/24|" | sed "s|.0/24|.${cidr_base}/24|")
+            
+            # Check if this CIDR conflicts with existing subnets
+            local conflict=$(aws ec2 describe-subnets \
+                --filters "Name=vpc-id,Values=$vpc_id" "Name=cidr-block,Values=$test_cidr" \
+                --region "$region" \
+                --query 'Subnets[0].SubnetId' \
+                --output text 2>/dev/null)
+            
+            if [ "$conflict" = "None" ] || [ -z "$conflict" ]; then
+                subnet_cidr="$test_cidr"
+            else
+                cidr_base=$((cidr_base + 10))
+            fi
+        done
+        
+        echo "   Creating public subnet $i with CIDR $subnet_cidr in AZ $az"
         
         local subnet_id=$(aws ec2 create-subnet \
             --vpc-id "$vpc_id" \
@@ -149,7 +170,28 @@ create_vpc_infrastructure() {
     
     for i in $(seq 1 $private_subnets); do
         local az="${az_array[$((i-1))]}"
-        local subnet_cidr=$(echo "$vpc_cidr" | sed "s|/16|/24|" | sed "s|.0/24|.$((i*20))/24|")
+        
+        # Find available CIDR block for private subnet
+        local subnet_cidr=""
+        local cidr_base=$((50 + (i-1) * 10))  # Start from different base for each subnet
+        while [ -z "$subnet_cidr" ]; do
+            local test_cidr=$(echo "$vpc_cidr" | sed "s|/16|/24|" | sed "s|.0/24|.${cidr_base}/24|")
+            
+            # Check if this CIDR conflicts with existing subnets
+            local conflict=$(aws ec2 describe-subnets \
+                --filters "Name=vpc-id,Values=$vpc_id" "Name=cidr-block,Values=$test_cidr" \
+                --region "$region" \
+                --query 'Subnets[0].SubnetId' \
+                --output text 2>/dev/null)
+            
+            if [ "$conflict" = "None" ] || [ -z "$conflict" ]; then
+                subnet_cidr="$test_cidr"
+            else
+                cidr_base=$((cidr_base + 10))
+            fi
+        done
+        
+        echo "   Creating private subnet $i with CIDR $subnet_cidr in AZ $az"
         
         local subnet_id=$(aws ec2 create-subnet \
             --vpc-id "$vpc_id" \
@@ -241,6 +283,7 @@ create_bastion_host() {
     local public_subnet_ids="$4"
     local instance_type="$5"
     local output_dir="$6"
+    local vpc_cidr="$7"
     
     echo "🏗️  Creating bastion host..."
     
@@ -297,12 +340,26 @@ create_bastion_host() {
     chmod 600 "$output_dir/bastion-key.pem"
     
     # Get latest Ubuntu 22.04 AMI
+    echo "   Getting latest Ubuntu 22.04 AMI..."
     local ami_id=$(aws ec2 describe-images \
         --owners 099720109477 \
         --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-22.04-*-amd64-server-*" "Name=state,Values=available" \
         --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
         --region "$region" \
-        --output text)
+        --output text 2>/dev/null)
+    
+    if [ "$ami_id" = "None" ] || [ -z "$ami_id" ]; then
+        echo "   Failed to get AMI ID, using fallback AMI..."
+        # Fallback to a known Ubuntu 22.04 AMI for us-east-1
+        if [ "$region" = "us-east-1" ]; then
+            ami_id="ami-0c7217cdde317cfec"  # Ubuntu 22.04 LTS in us-east-1
+        else
+            echo "❌ Error: Could not determine AMI ID for region $region"
+            return 1
+        fi
+    fi
+    
+    echo "   Using AMI: $ami_id"
     
     # Create user data script
     cat > "$output_dir/bastion-userdata.sh" <<'EOF'
@@ -367,10 +424,10 @@ DNS.1 = registry.local
 DNS.2 = *.local
 DNS.3 = localhost
 DNS.4 = registry
-DNS.5 = registry.$INSTANCE_ID.local
+DNS.5 = registry.${INSTANCE_ID}.local
 IP.1 = 127.0.0.1
-IP.2 = $PUBLIC_IP
-IP.3 = $PRIVATE_IP
+IP.2 = ${PUBLIC_IP}
+IP.3 = ${PRIVATE_IP}
 EOF
 
 openssl req -newkey rsa:4096 -nodes -sha256 \
@@ -613,7 +670,7 @@ main() {
     # Create bastion host
     local vpc_id=$(cat "$OUTPUT_DIR/vpc-id")
     local public_subnet_ids=$(cat "$OUTPUT_DIR/public-subnet-ids")
-    create_bastion_host "$CLUSTER_NAME" "$REGION" "$vpc_id" "$public_subnet_ids" "$INSTANCE_TYPE" "$OUTPUT_DIR"
+    create_bastion_host "$CLUSTER_NAME" "$REGION" "$vpc_id" "$public_subnet_ids" "$INSTANCE_TYPE" "$OUTPUT_DIR" "$VPC_CIDR"
     
     # Create cluster security group
     create_cluster_security_group "$CLUSTER_NAME" "$REGION" "$vpc_id" "$OUTPUT_DIR"

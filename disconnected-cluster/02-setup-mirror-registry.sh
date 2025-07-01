@@ -105,6 +105,11 @@ sudo dnf install -y httpd-tools
 echo "🔐 Creating registry authentication..."
 htpasswd -bBc $registry_storage/auth/htpasswd $registry_user "$registry_password"
 
+# Get instance metadata
+INSTANCE_ID=$(ssh $ssh_opts $bastion_user@$bastion_ip "curl -s http://169.254.169.254/latest/meta-data/instance-id")
+PUBLIC_IP=$(ssh $ssh_opts $bastion_user@$bastion_ip "curl -s http://169.254.169.254/latest/meta-data/public-ipv4")
+PRIVATE_IP=$(ssh $ssh_opts $bastion_user@$bastion_ip "curl -s http://169.254.169.254/latest/meta-data/local-ipv4")
+
 # Create self-signed certificate with multiple SANs
 echo "🔒 Creating self-signed certificate with multiple SANs..."
 cat > $registry_storage/certs/openssl.conf <<EOF
@@ -118,7 +123,7 @@ C = US
 ST = State
 L = City
 O = Organization
-CN = registry.$cluster_name.local
+CN = registry.local
 
 [v3_req]
 keyUsage = keyEncipherment, dataEncipherment
@@ -126,12 +131,14 @@ extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 
 [alt_names]
-DNS.1 = registry.$cluster_name.local
+DNS.1 = registry.local
 DNS.2 = *.local
 DNS.3 = localhost
 DNS.4 = registry
+DNS.5 = registry.${INSTANCE_ID}.local
 IP.1 = 127.0.0.1
-IP.2 = $bastion_ip
+IP.2 = ${PUBLIC_IP}
+IP.3 = ${PRIVATE_IP}
 EOF
 
 openssl req -newkey rsa:4096 -nodes -sha256 \
