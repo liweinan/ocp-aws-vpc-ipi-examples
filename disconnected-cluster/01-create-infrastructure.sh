@@ -342,7 +342,7 @@ create_bastion_host() {
     # Get latest Ubuntu 22.04 AMI
     echo "   Getting latest Ubuntu 22.04 AMI..."
     local ami_id=$(aws ec2 describe-images \
-        --owners 099720109477 \
+        --owners self \
         --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-22.04-*-amd64-server-*" "Name=state,Values=available" \
         --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
         --region "$region" \

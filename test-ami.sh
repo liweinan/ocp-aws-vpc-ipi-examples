@@ -24,5 +24,5 @@ else
     # Try to find alternative Fedora AMIs
     echo ""
     echo "Searching for alternative Fedora AMIs..."
-    AWS_PROFILE=static aws ec2 describe-images --owners 125523088429 --filters "Name=state,Values=available" "Name=architecture,Values=x86_64" --region "$REGION" --query 'Images[0:3].[ImageId,Name]' --output table
+    AWS_PROFILE=static aws ec2 describe-images --owners self --filters "Name=state,Values=available" "Name=architecture,Values=x86_64" --region "$REGION" --query 'Images[0:3].[ImageId,Name]' --output table
 fi 

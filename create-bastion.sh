@@ -416,7 +416,7 @@ else
     # Use Amazon Linux 2023 instead of Amazon Linux 2
     echo "🖼️  Getting latest Amazon Linux 2023 AMI..."
     AL2023_AMI=$(aws ec2 describe-images \
-        --owners amazon \
+        --owners self \
         --region "$REGION" \
         --filters 'Name=name,Values=al2023-ami-*-x86_64' 'Name=architecture,Values=x86_64' 'Name=state,Values=available' \
         --query 'Images[*].[ImageId,CreationDate]' \

@@ -11,7 +11,7 @@ DEFAULT_CLUSTER_NAME="disconnected-cluster"
 DEFAULT_OPENSHIFT_VERSION="4.19.2"
 DEFAULT_REGISTRY_PORT="5000"
 DEFAULT_REGISTRY_USER="admin"
-DEFAULT_REGISTRY_PASSWORD="admin123"
+DEFAULT_REGISTRY_PASSWORD="${REGISTRY_PASSWORD:-admin123}"
 DEFAULT_DRY_RUN="no"
 
 # Colors for output
@@ -332,8 +332,8 @@ $(curl -k -s -u admin:admin123 "https://localhost:${registry_port}/v2/_catalog" 
 2. Run: ./05-install-cluster.sh to install the cluster
 
 ## Verification Commands:
-- List images: curl -k -u admin:admin123 https://localhost:${registry_port}/v2/_catalog
-- Login: podman login --username admin --password admin123 --tls-verify=false localhost:${registry_port}
+- List images: curl -k -u admin:\${REGISTRY_PASSWORD:-admin123} https://localhost:${registry_port}/v2/_catalog
+- Login: podman login --username admin --password \${REGISTRY_PASSWORD:-admin123} --tls-verify=false localhost:${registry_port}
 - Check CLI: oc version
 - Check installer: openshift-install version
 EOF
