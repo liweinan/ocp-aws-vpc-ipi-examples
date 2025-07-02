@@ -19,8 +19,9 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 3. **搭建镜像仓库** - 在bastion host上部署私有镜像仓库
 4. **同步镜像** - 从外部环境同步OpenShift镜像到私有仓库
 5. **配置安装环境** - 准备disconnected cluster的安装配置
-6. **安装集群** - 使用私有镜像仓库安装OpenShift集群
-7. **验证和配置** - 验证集群功能并配置后续使用
+6. **创建和修改Manifests** - 生成并自定义OpenShift manifests以支持断网环境
+7. **安装集群** - 使用私有镜像仓库安装OpenShift集群
+8. **验证和配置** - 验证集群功能并配置后续使用
 
 ## 脚本说明
 
@@ -31,7 +32,7 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 | `02-setup-mirror-registry.sh` | 搭建镜像仓库 | 在bastion host上部署私有镜像仓库 |
 | `03-sync-images.sh` | 同步镜像 | 从外部同步OpenShift镜像到私有仓库 |
 | `04-prepare-install-config.sh` | 准备安装配置 | 生成disconnected cluster的安装配置 |
-| `05-install-cluster.sh` | 安装集群 | 使用私有镜像仓库安装OpenShift |
+| `05-install-cluster.sh` | 安装集群 | 创建manifests、修改配置、安装OpenShift集群 |
 | `06-verify-cluster.sh` | 验证集群 | 验证集群功能和镜像仓库配置 |
 | `07-cleanup.sh` | 清理资源 | 清理安装过程中产生的临时文件 |
 
@@ -73,7 +74,7 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 # 5. 准备安装配置
 ./04-prepare-install-config.sh --cluster-name my-disconnected-cluster --base-domain example.com
 
-# 6. 安装集群
+# 6. 安装集群（包含manifest创建和修改）
 ./05-install-cluster.sh --cluster-name my-disconnected-cluster
 
 # 7. 验证集群
@@ -103,6 +104,49 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 - **日志存储**: 本地存储
 - **备份**: 可选的S3备份
 
+### Manifest配置
+
+对于disconnected cluster，`05-install-cluster.sh`脚本会自动创建和修改必要的manifests：
+
+#### 自动创建的Manifests
+
+1. **disconnected-cluster-config.yaml**
+   - 配置集群类型为disconnected
+   - 设置镜像仓库URL和用户信息
+   - 存储在`openshift-config`命名空间
+
+2. **registry-network-policy.yaml**
+   - 配置网络策略以允许镜像仓库访问
+   - 确保集群内服务可以访问本地镜像仓库
+   - 应用在`openshift-image-registry`命名空间
+
+#### Manifest修改过程
+
+```bash
+# 1. 创建基础manifests
+openshift-install create manifests --dir=.
+
+# 2. 应用disconnected cluster特定配置
+# - 添加镜像仓库访问策略
+# - 配置集群类型标识
+# - 设置网络策略
+
+# 3. 验证manifests
+openshift-install validate manifests --dir=.
+```
+
+#### 调试模式
+
+脚本默认使用debug日志级别，提供详细的安装过程信息：
+
+```bash
+# 查看详细安装日志
+tail -f logs/install-*.log
+
+# 查看manifest创建日志
+grep "manifest" logs/install-*.log
+```
+
 ## 故障排除
 
 ### 常见问题
@@ -122,11 +166,22 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
    - 验证安全组规则
    - 检查证书配置
 
+4. **Manifest创建失败**
+   - 检查install-config.yaml语法
+   - 验证镜像仓库可访问性
+   - 查看debug日志获取详细信息
+
+5. **Manifest验证失败**
+   - 检查网络策略配置
+   - 验证镜像内容源配置
+   - 确认证书配置正确
+
 ### 日志位置
 
 - **安装日志**: `./logs/install-*.log`
 - **镜像同步日志**: `./logs/sync-*.log`
 - **基础设施日志**: `./logs/infra-*.log`
+- **Manifest日志**: 包含在安装日志中，使用debug级别查看
 
 ## 清理
 
@@ -142,6 +197,8 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 3. **安全**: 定期更新镜像仓库的认证信息
 4. **备份**: 定期备份镜像仓库数据
 5. **监控**: 监控镜像仓库的性能和可用性
+6. **Manifests**: 确保disconnected cluster的manifests正确配置，特别是镜像内容源和网络策略
+7. **调试**: 使用debug日志级别进行故障排除，提供更详细的安装信息
 
 ## 相关文档
 
