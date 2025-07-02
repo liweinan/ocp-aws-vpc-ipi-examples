@@ -569,7 +569,7 @@ EOF
         --user-data file://"$output_dir/bastion-userdata.sh" \
         --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${cluster_name}-bastion}]" \
         --region "$region" \
-        --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":20}}]' \
+        --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":50}}]' \
         --query 'Instances[0].InstanceId' \
         --output text)
     

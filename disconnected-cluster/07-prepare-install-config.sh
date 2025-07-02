@@ -2,6 +2,7 @@
 
 # Install Config Preparation Script for Disconnected OpenShift Cluster
 # This script can run locally to copy itself to bastion, or directly on bastion host
+# Updated to use CI registry images (registry.ci.openshift.org/ocp/4.19.2)
 
 set -euo pipefail
 
@@ -12,7 +13,7 @@ export AWS_PROFILE=${AWS_PROFILE:-static}
 DEFAULT_CLUSTER_NAME="disconnected-cluster"
 DEFAULT_INFRA_OUTPUT_DIR="./infra-output"
 DEFAULT_SYNC_OUTPUT_DIR="./sync-output"
-DEFAULT_BASE_DOMAIN="example.com"
+DEFAULT_BASE_DOMAIN="qe.devcluster.openshift.com"
 DEFAULT_REGION="us-east-1"
 DEFAULT_REGISTRY_PORT="5000"
 DEFAULT_REGISTRY_USER="admin"
@@ -208,10 +209,16 @@ additionalTrustBundle: |
 $(echo "$registry_cert" | sed 's/^/  /')
 imageContentSources:
 - mirrors:
-  - localhost:$registry_port/openshift/release
+  - localhost:$registry_port/openshift
+  source: registry.ci.openshift.org/ocp/4.19.2
+- mirrors:
+  - localhost:$registry_port/openshift
+  source: registry.ci.openshift.org/openshift
+- mirrors:
+  - localhost:$registry_port/openshift
   source: quay.io/openshift-release-dev/ocp-release
 - mirrors:
-  - localhost:$registry_port/openshift/release
+  - localhost:$registry_port/openshift
   source: quay.io/openshift-release-dev/ocp-v4.0-art-dev
 EOF
     
