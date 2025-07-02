@@ -198,7 +198,6 @@ EOF
     
     # Continue with the rest of the config
     cat >> "$install_dir/install-config.yaml" <<EOF
-    vpc: $vpc_id
 publish: Internal
 pullSecret: '$pull_secret_content'
 sshKey: |
