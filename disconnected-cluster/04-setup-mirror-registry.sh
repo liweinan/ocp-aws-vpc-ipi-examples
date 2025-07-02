@@ -156,12 +156,12 @@ EOF
     
     # Stop existing registry if running
     echo -e "${BLUE}🛑 Stopping existing registry if running...${NC}"
-    podman stop mirror-registry 2>/dev/null || true
-    podman rm mirror-registry 2>/dev/null || true
+    sudo podman stop mirror-registry 2>/dev/null || true
+    sudo podman rm mirror-registry 2>/dev/null || true
     
     # Start registry with authentication and TLS
     echo -e "${BLUE}🚀 Starting mirror registry...${NC}"
-    podman run -d \
+    sudo podman run -d \
         --name mirror-registry \
         --restart=always \
         -p "$registry_port:5000" \
@@ -186,7 +186,7 @@ EOF
     else
         echo -e "${RED}❌ Registry test failed${NC}"
         echo "Checking registry logs..."
-        podman logs mirror-registry
+        sudo podman logs mirror-registry
         exit 1
     fi
     
@@ -219,7 +219,7 @@ REGISTRY_PASSWORD="$registry_password"
 # Function to login to registry
 registry_login() {
     echo "🔐 Logging into registry..."
-    podman login --username \$REGISTRY_USER --password \$REGISTRY_PASSWORD --tls-verify=false \$REGISTRY_URL
+    sudo podman login --username \$REGISTRY_USER --password \$REGISTRY_PASSWORD --tls-verify=false \$REGISTRY_URL
 }
 
 # Function to list images in registry
@@ -251,8 +251,8 @@ show_info() {
     echo "   Docker: \$REGISTRY_URL"
     echo ""
     echo "📝 Usage examples:"
-    echo "   podman login --username \$REGISTRY_USER --password \$REGISTRY_PASSWORD --tls-verify=false \$REGISTRY_URL"
-    echo "   podman pull \$REGISTRY_URL/openshift/ose-cli:latest"
+    echo "   sudo podman login --username \$REGISTRY_USER --password \$REGISTRY_PASSWORD --tls-verify=false \$REGISTRY_URL"
+    echo "   sudo podman pull \$REGISTRY_URL/openshift/ose-cli:latest"
     echo "   curl -k -u \$REGISTRY_USER:\$REGISTRY_PASSWORD https://\$REGISTRY_URL/v2/_catalog"
 }
 
@@ -317,7 +317,7 @@ test_registry_access() {
     
     # Test Docker/Podman access
     if command -v podman &> /dev/null; then
-        if podman login --username "$registry_user" --password "$registry_password" --tls-verify=false "localhost:$registry_port" >/dev/null 2>&1; then
+        if sudo podman login --username "$registry_user" --password "$registry_password" --tls-verify=false "localhost:$registry_port" >/dev/null 2>&1; then
             echo -e "${GREEN}✅ Registry Docker/Podman access working${NC}"
         else
             echo -e "${YELLOW}⚠️  Registry Docker/Podman access failed (this is normal if you haven't synced images yet)${NC}"

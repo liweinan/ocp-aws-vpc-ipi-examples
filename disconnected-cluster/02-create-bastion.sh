@@ -8,7 +8,7 @@ set -eo pipefail
 # Default values
 DEFAULT_CLUSTER_NAME="disconnected-cluster"
 DEFAULT_REGION="us-east-1"
-DEFAULT_INSTANCE_TYPE="t3.medium"
+DEFAULT_INSTANCE_TYPE="t3.large"
 DEFAULT_AMI_OWNER="amazon"
 DEFAULT_AMI_NAME="amzn2-ami-hvm-*-x86_64-gp2"
 DEFAULT_OUTPUT_DIR="./infra-output"
@@ -25,6 +25,7 @@ usage() {
     echo "  --sno                 Enable Single Node OpenShift (SNO) mode (default: enabled)"
     echo "  --no-sno              Disable SNO mode for multi-node deployment"
     echo "  --dry-run             Show what would be created without actually creating"
+    echo "  --delete              Delete bastion host and related resources"
     echo "  --help                Display this help message"
     echo ""
     echo "Prerequisites:"
@@ -273,6 +274,7 @@ EOF
             --security-group-ids "$bastion_sg_id" \
             --subnet-id "$first_public_subnet" \
             --user-data "file://$output_dir/bastion-userdata.sh" \
+            --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":50,"VolumeType":"gp3","DeleteOnTermination":true}}]' \
             --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${cluster_name}-bastion}]" \
             --region "$region" \
             --query 'Instances[0].InstanceId' \
@@ -305,6 +307,251 @@ EOF
     echo "   Instance ID: $instance_id"
     echo "   Public IP: $public_ip"
     echo "   Security Group: $bastion_sg_id"
+}
+
+# Function to delete bastion host and related resources
+delete_bastion_host() {
+    local cluster_name="$1"
+    local region="$2"
+    local output_dir="$3"
+    
+    echo "🗑️  Deleting bastion host and related resources..."
+    
+    # Check if output directory exists
+    if [[ ! -d "$output_dir" ]]; then
+        echo "❌ Output directory does not exist: $output_dir"
+        echo "Nothing to delete"
+        return 0
+    fi
+    
+    # Delete bastion instance if exists
+    if [[ -f "$output_dir/bastion-instance-id" ]]; then
+        local instance_id=$(cat "$output_dir/bastion-instance-id")
+        echo "   Terminating bastion instance: $instance_id"
+        
+        # Check if instance exists and is not already terminated
+        local instance_state=$(aws ec2 describe-instances \
+            --instance-ids "$instance_id" \
+            --region "$region" \
+            --query 'Reservations[0].Instances[0].State.Name' \
+            --output text 2>/dev/null || echo "not-found")
+        
+        if [[ "$instance_state" != "not-found" && "$instance_state" != "terminated" && "$instance_state" != "terminating" ]]; then
+            aws ec2 terminate-instances \
+                --instance-ids "$instance_id" \
+                --region "$region" \
+                --output table
+            echo "   ✅ Instance termination initiated"
+            
+            # Wait for instance to be terminated
+            echo "   Waiting for instance to terminate..."
+            aws ec2 wait instance-terminated \
+                --instance-ids "$instance_id" \
+                --region "$region"
+            echo "   ✅ Instance terminated"
+        else
+            echo "   ℹ️  Instance is already terminated or not found"
+        fi
+        
+        rm -f "$output_dir/bastion-instance-id"
+        rm -f "$output_dir/bastion-public-ip"
+    else
+        echo "   ℹ️  No bastion instance ID found"
+    fi
+    
+    # Delete cluster security group first (it may reference bastion security group)
+    if [[ -f "$output_dir/cluster-security-group-id" ]]; then
+        local cluster_sg_id=$(cat "$output_dir/cluster-security-group-id")
+        echo "   Deleting cluster security group: $cluster_sg_id"
+        
+        # Check if security group exists
+        local cluster_sg_exists=$(aws ec2 describe-security-groups \
+            --group-ids "$cluster_sg_id" \
+            --region "$region" \
+            --query 'SecurityGroups[0].GroupId' \
+            --output text 2>/dev/null || echo "not-found")
+        
+        if [[ "$cluster_sg_exists" != "not-found" ]]; then
+            # Remove all rules from cluster security group first
+            echo "   Removing all ingress rules from cluster security group..."
+            local cluster_rules=$(aws ec2 describe-security-groups \
+                --group-ids "$cluster_sg_id" \
+                --region "$region" \
+                --query 'SecurityGroups[0].IpPermissions' \
+                --output json)
+            
+            if [[ "$cluster_rules" != "[]" && "$cluster_rules" != "null" ]]; then
+                aws ec2 revoke-security-group-ingress \
+                    --group-id "$cluster_sg_id" \
+                    --ip-permissions "$cluster_rules" \
+                    --region "$region" 2>/dev/null || true
+                echo "   ✅ Removed all ingress rules from cluster security group"
+            fi
+            
+            # Remove all egress rules (except default)
+            local cluster_egress=$(aws ec2 describe-security-groups \
+                --group-ids "$cluster_sg_id" \
+                --region "$region" \
+                --query 'SecurityGroups[0].IpPermissionsEgress[?!(IpProtocol==`-1` && IpRanges[0].CidrIp==`0.0.0.0/0`)]' \
+                --output json)
+            
+            if [[ "$cluster_egress" != "[]" && "$cluster_egress" != "null" ]]; then
+                aws ec2 revoke-security-group-egress \
+                    --group-id "$cluster_sg_id" \
+                    --ip-permissions "$cluster_egress" \
+                    --region "$region" 2>/dev/null || true
+                echo "   ✅ Removed custom egress rules from cluster security group"
+            fi
+            
+            # Now try to delete the cluster security group
+            if aws ec2 delete-security-group \
+                --group-id "$cluster_sg_id" \
+                --region "$region" 2>/dev/null; then
+                echo "   ✅ Cluster security group deleted"
+            else
+                echo "   ⚠️  Could not delete cluster security group (may have remaining dependencies)"
+                echo "   You may need to manually clean up security group: $cluster_sg_id"
+            fi
+        else
+            echo "   ℹ️  Cluster security group not found"
+        fi
+        
+        rm -f "$output_dir/cluster-security-group-id"
+    else
+        echo "   ℹ️  No cluster security group ID found"
+    fi
+    
+    # Delete bastion security group if exists
+    if [[ -f "$output_dir/bastion-security-group-id" ]]; then
+        local sg_id=$(cat "$output_dir/bastion-security-group-id")
+        echo "   Deleting bastion security group: $sg_id"
+        
+        # Check if security group exists
+        local sg_exists=$(aws ec2 describe-security-groups \
+            --group-ids "$sg_id" \
+            --region "$region" \
+            --query 'SecurityGroups[0].GroupId' \
+            --output text 2>/dev/null || echo "not-found")
+        
+        if [[ "$sg_exists" != "not-found" ]]; then
+            # Remove all rules from bastion security group first
+            echo "   Removing all ingress rules from bastion security group..."
+            local bastion_rules=$(aws ec2 describe-security-groups \
+                --group-ids "$sg_id" \
+                --region "$region" \
+                --query 'SecurityGroups[0].IpPermissions' \
+                --output json)
+            
+            if [[ "$bastion_rules" != "[]" && "$bastion_rules" != "null" ]]; then
+                aws ec2 revoke-security-group-ingress \
+                    --group-id "$sg_id" \
+                    --ip-permissions "$bastion_rules" \
+                    --region "$region" 2>/dev/null || true
+                echo "   ✅ Removed all ingress rules from bastion security group"
+            fi
+            
+            # Remove all egress rules (except default)
+            local bastion_egress=$(aws ec2 describe-security-groups \
+                --group-ids "$sg_id" \
+                --region "$region" \
+                --query 'SecurityGroups[0].IpPermissionsEgress[?!(IpProtocol==`-1` && IpRanges[0].CidrIp==`0.0.0.0/0`)]' \
+                --output json)
+            
+            if [[ "$bastion_egress" != "[]" && "$bastion_egress" != "null" ]]; then
+                aws ec2 revoke-security-group-egress \
+                    --group-id "$sg_id" \
+                    --ip-permissions "$bastion_egress" \
+                    --region "$region" 2>/dev/null || true
+                echo "   ✅ Removed custom egress rules from bastion security group"
+            fi
+            
+            # Also remove any rules from other security groups that reference this bastion security group
+            echo "   Removing security group rule dependencies..."
+            
+            # Find all security groups that reference this bastion security group
+            local referencing_sgs=$(aws ec2 describe-security-groups \
+                --region "$region" \
+                --query "SecurityGroups[?IpPermissions[?UserIdGroupPairs[?GroupId=='$sg_id']]].GroupId" \
+                --output text)
+            
+            if [[ -n "$referencing_sgs" && "$referencing_sgs" != "None" ]]; then
+                for ref_sg in $referencing_sgs; do
+                    echo "   Removing rules from security group $ref_sg that reference $sg_id"
+                    
+                    # Get the rules that reference our security group
+                    local rules=$(aws ec2 describe-security-groups \
+                        --group-ids "$ref_sg" \
+                        --region "$region" \
+                        --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$sg_id']]" \
+                        --output json)
+                    
+                    if [[ "$rules" != "[]" && "$rules" != "null" ]]; then
+                        # Remove the rules
+                        aws ec2 revoke-security-group-ingress \
+                            --group-id "$ref_sg" \
+                            --ip-permissions "$rules" \
+                            --region "$region" 2>/dev/null || true
+                        echo "   ✅ Removed ingress rules from $ref_sg"
+                    fi
+                done
+            fi
+            
+            # Now try to delete the bastion security group
+            if aws ec2 delete-security-group \
+                --group-id "$sg_id" \
+                --region "$region" 2>/dev/null; then
+                echo "   ✅ Bastion security group deleted"
+            else
+                echo "   ⚠️  Could not delete bastion security group (may have remaining dependencies)"
+                echo "   You may need to manually clean up security group: $sg_id"
+            fi
+        else
+            echo "   ℹ️  Bastion security group not found"
+        fi
+        
+        rm -f "$output_dir/bastion-security-group-id"
+    else
+        echo "   ℹ️  No bastion security group ID found"
+    fi
+    
+    # Delete SSH key pair if exists
+    local key_name="${cluster_name}-bastion-key"
+    echo "   Deleting SSH key pair: $key_name"
+    
+    local key_exists=$(aws ec2 describe-key-pairs \
+        --key-names "$key_name" \
+        --region "$region" \
+        --query 'KeyPairs[0].KeyName' \
+        --output text 2>/dev/null || echo "not-found")
+    
+    if [[ "$key_exists" != "not-found" ]]; then
+        aws ec2 delete-key-pair \
+            --key-name "$key_name" \
+            --region "$region"
+        echo "   ✅ SSH key pair deleted from AWS"
+    else
+        echo "   ℹ️  SSH key pair not found in AWS"
+    fi
+    
+    # Remove local SSH key file
+    if [[ -f "$output_dir/bastion-key.pem" ]]; then
+        rm -f "$output_dir/bastion-key.pem"
+        echo "   ✅ Local SSH key file removed"
+    else
+        echo "   ℹ️  No local SSH key file found"
+    fi
+    
+    echo ""
+    echo "✅ Bastion host deletion completed!"
+    echo ""
+    echo "🧹 Cleaned up resources:"
+    echo "   - Bastion EC2 instance"
+    echo "   - Bastion security group"
+    echo "   - Cluster security group"
+    echo "   - SSH key pair (AWS and local file)"
+    echo ""
+    echo "ℹ️  VPC infrastructure remains intact"
+    echo "   To recreate bastion host, run: $0 --cluster-name $cluster_name"
 }
 
 # Function to create cluster security group
@@ -449,6 +696,10 @@ main() {
                 DRY_RUN="yes"
                 shift
                 ;;
+            --delete)
+                DELETE_MODE="yes"
+                shift
+                ;;
             --help)
                 usage
                 ;;
@@ -465,6 +716,7 @@ main() {
     INSTANCE_TYPE=${INSTANCE_TYPE:-$DEFAULT_INSTANCE_TYPE}
     OUTPUT_DIR=${OUTPUT_DIR:-$DEFAULT_OUTPUT_DIR}
     DRY_RUN=${DRY_RUN:-no}
+    DELETE_MODE=${DELETE_MODE:-no}
     SNO_MODE=${SNO_MODE:-$DEFAULT_SNO_MODE}
     
     # Display script header
@@ -477,8 +729,23 @@ main() {
     echo "   Bastion Instance Type: $INSTANCE_TYPE"
     echo "   Output Directory: $OUTPUT_DIR"
     echo "   Dry Run: $DRY_RUN"
+    echo "   Delete Mode: $DELETE_MODE"
     echo "   SNO Mode: $SNO_MODE"
     echo ""
+    
+    # Handle delete mode
+    if [[ "$DELETE_MODE" == "yes" ]]; then
+        echo "🗑️  DELETE MODE - Removing bastion host and related resources"
+        echo ""
+        
+        # Check prerequisites for deletion
+        check_prerequisites
+        validate_aws_credentials
+        
+        # Delete bastion host
+        delete_bastion_host "$CLUSTER_NAME" "$REGION" "$OUTPUT_DIR"
+        exit 0
+    fi
     
     if [[ "$DRY_RUN" == "yes" ]]; then
         echo "🔍 DRY RUN MODE - No resources will be created"

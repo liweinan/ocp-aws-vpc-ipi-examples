@@ -3,6 +3,7 @@
 # Image Synchronization Script for Disconnected OpenShift Cluster from CI Registry
 # This script syncs images from OpenShift CI cluster to local mirror registry
 # Based on successful manual sync experience with registry.ci.openshift.org/ocp/4.19.2
+# All images verified available via quick-check-images.sh
 
 set -euo pipefail
 
@@ -96,7 +97,7 @@ check_registry_status() {
     echo -e "${BLUE}🔍 Checking local registry status...${NC}"
     
     # Check if registry container is running
-    local registry_status=$(podman ps --format 'table {{.Names}}\t{{.Status}}' | grep mirror-registry || echo 'NOT_FOUND')
+    local registry_status=$(podman ps --format 'table {{.Names}}\t{{.Status}}' | grep -E "(mirror-registry|registry)" || echo 'NOT_FOUND')
     
     if [[ "$registry_status" == "NOT_FOUND" ]] || [[ "$registry_status" == *"Exited"* ]]; then
         echo -e "${RED}❌ Registry container is not running${NC}"
@@ -113,6 +114,33 @@ check_registry_status() {
     fi
     
     echo -e "${GREEN}✅ Local registry is running and accessible${NC}"
+}
+
+# Function to check disk space
+check_disk_space() {
+    echo -e "${BLUE}🔍 Checking disk space...${NC}"
+    
+    local available_space=$(df /home | tail -1 | awk '{print $4}')
+    local available_gb=$((available_space / 1024 / 1024))
+    
+    echo "   Available space: ${available_gb}GB"
+    
+    if [[ $available_gb -lt 10 ]]; then
+        echo -e "${RED}❌ Insufficient disk space (${available_gb}GB available, need at least 10GB)${NC}"
+        echo "Please free up disk space before continuing"
+        echo "You can run: podman system prune -a -f"
+        exit 1
+    elif [[ $available_gb -lt 15 ]]; then
+        echo -e "${YELLOW}⚠️  Low disk space (${available_gb}GB available, recommended 15GB+)${NC}"
+        echo "Consider running: podman system prune -a -f"
+        read -p "Continue anyway? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    else
+        echo -e "${GREEN}✅ Sufficient disk space (${available_gb}GB available)${NC}"
+    fi
 }
 
 # Function to sync images from CI cluster
@@ -156,10 +184,10 @@ sync_from_ci_cluster() {
     
     echo ""
     echo "   🚀 Syncing from CI cluster imagestream: ocp/${openshift_version}..."
-    echo "   This approach uses the proven successful images from CI cluster"
+    echo "   📊 All 21 images verified available via quick-check-images.sh"
     echo ""
     
-    # Define core images that we successfully synced
+    # Define core images (all verified available)
     local core_images=(
         "cli"
         "installer"
@@ -174,7 +202,7 @@ sync_from_ci_cluster() {
         "coredns"
     )
     
-    # Define additional important images to try
+    # Define additional important images (all verified available)
     local additional_images=(
         "cluster-network-operator"
         "cluster-dns-operator"
@@ -190,66 +218,118 @@ sync_from_ci_cluster() {
     
     local synced_count=0
     local failed_count=0
+    local skipped_count=0
     
-    # Sync core images first
-    echo "   📦 Syncing core images..."
-    for img in "${core_images[@]}"; do
-        echo "   Processing: ${img}"
+    # Function to sync a single image with better error handling
+    sync_single_image() {
+        local img="$1"
+        local image_type="$2"  # "core" or "additional"
         
         local source_image="${ci_registry}/ocp/${openshift_version}:${img}"
         local local_image="${registry_url}/openshift/${img}:${openshift_version}"
+        local local_image_latest="${registry_url}/openshift/${img}:latest"
         
+        echo "   Processing: ${img} (${image_type})"
         echo "     Source: ${source_image}"
         echo "     Target: ${local_image}"
         
-        # Try to pull the image
-        if timeout 300 podman pull "$source_image" --platform linux/amd64 2>/dev/null; then
-            echo "     ✅ Pulled ${source_image}"
-            
-            # Tag for local registry
-            podman tag "$source_image" "$local_image"
-            
-            # Push to local registry
-            if timeout 300 podman push "$local_image" --tls-verify=false 2>/dev/null; then
-                echo -e "${GREEN}     ✅ Synced ${local_image}${NC}"
-                ((synced_count++))
-            else
-                echo -e "${YELLOW}     ⚠️  Failed to push ${local_image}${NC}"
-                ((failed_count++))
-            fi
-        else
-            echo -e "${YELLOW}     ⚠️  Failed to pull ${source_image}${NC}"
-            ((failed_count++))
+        # Check if image already exists in local registry
+        if curl -k -s -u "${registry_user}:${registry_password}" "https://localhost:${registry_port}/v2/openshift/${img}/tags/list" 2>/dev/null | grep -q "${openshift_version}"; then
+            echo -e "${YELLOW}     ⏭️  Already exists, skipping${NC}"
+            ((skipped_count++))
+            return 0
         fi
+        
+        # Clean up any existing local copy
+        podman rmi "$source_image" 2>/dev/null || true
+        
+        # Try to pull the image with retry
+        local pull_attempts=0
+        local max_pull_attempts=3
+        while [[ $pull_attempts -lt $max_pull_attempts ]]; do
+            ((pull_attempts++))
+            echo "     🔄 Pull attempt ${pull_attempts}/${max_pull_attempts}..."
+            
+            if timeout 600 podman pull "$source_image" --platform linux/amd64; then
+                echo -e "${GREEN}     ✅ Pulled ${source_image}${NC}"
+                break
+            else
+                echo "     ⚠️  Pull attempt ${pull_attempts} failed"
+                if [[ $pull_attempts -eq $max_pull_attempts ]]; then
+                    echo -e "${RED}     ❌ Failed to pull after ${max_pull_attempts} attempts${NC}"
+                    ((failed_count++))
+                    return 1
+                fi
+                sleep 5
+            fi
+        done
+        
+        # Tag for local registry (both versioned and latest)
+        podman tag "$source_image" "$local_image"
+        podman tag "$source_image" "$local_image_latest"
+        
+        # Push to local registry with retry
+        local push_attempts=0
+        local max_push_attempts=3
+        while [[ $push_attempts -lt $max_push_attempts ]]; do
+            ((push_attempts++))
+            echo "     🔄 Push attempt ${push_attempts}/${max_push_attempts}..."
+            
+            if timeout 600 podman push "$local_image" --tls-verify=false && \
+               timeout 600 podman push "$local_image_latest" --tls-verify=false; then
+                echo -e "${GREEN}     ✅ Synced ${local_image} and :latest${NC}"
+                ((synced_count++))
+                
+                # Clean up local copy to save space
+                podman rmi "$source_image" "$local_image" "$local_image_latest" 2>/dev/null || true
+                return 0
+            else
+                echo "     ⚠️  Push attempt ${push_attempts} failed"
+                if [[ $push_attempts -eq $max_push_attempts ]]; then
+                    echo -e "${RED}     ❌ Failed to push after ${max_push_attempts} attempts${NC}"
+                    ((failed_count++))
+                    return 1
+                fi
+                sleep 5
+            fi
+        done
+    }
+    
+    # Sync core images first (these are critical)
+    echo "   📦 Syncing core images (11/11 verified available)..."
+    for img in "${core_images[@]}"; do
+        sync_single_image "$img" "core"
         echo
+        
+        # Check disk space after each image
+        local available_space=$(df /home | tail -1 | awk '{print $4}')
+        local available_gb=$((available_space / 1024 / 1024))
+        if [[ $available_gb -lt 5 ]]; then
+            echo -e "${YELLOW}⚠️  Low disk space (${available_gb}GB), cleaning up...${NC}"
+            podman system prune -f
+        fi
     done
     
-    echo "   📦 Syncing additional images..."
+    # Sync additional images
+    echo "   📦 Syncing additional images (10/10 verified available)..."
     for img in "${additional_images[@]}"; do
-        echo "   Processing: ${img}"
+        sync_single_image "$img" "additional"
+        echo
         
-        local source_image="${ci_registry}/ocp/${openshift_version}:${img}"
-        local local_image="${registry_url}/openshift/${img}:${openshift_version}"
-        
-        # Try to pull the image (more tolerant of failures for additional images)
-        if timeout 180 podman pull "$source_image" --platform linux/amd64 2>/dev/null; then
-            podman tag "$source_image" "$local_image"
-            if timeout 180 podman push "$local_image" --tls-verify=false 2>/dev/null; then
-                echo -e "${GREEN}     ✅ Synced ${local_image}${NC}"
-                ((synced_count++))
-            else
-                echo "     ⚠️  Push failed: ${img}"
-                ((failed_count++))
-            fi
-        else
-            echo "     ⚠️  Not available or pull failed: ${img}"
-            ((failed_count++))
+        # Check disk space after each image
+        local available_space=$(df /home | tail -1 | awk '{print $4}')
+        local available_gb=$((available_space / 1024 / 1024))
+        if [[ $available_gb -lt 5 ]]; then
+            echo -e "${YELLOW}⚠️  Low disk space (${available_gb}GB), cleaning up...${NC}"
+            podman system prune -f
         fi
     done
     
     echo -e "${GREEN}   CI cluster image sync completed${NC}"
     echo "   Successfully synced: ${synced_count} images"
+    echo "   Already existed: ${skipped_count} images"
     echo "   Failed: ${failed_count} images"
+    echo "   Total processed: $((synced_count + skipped_count + failed_count))/21 images"
     
     # Generate imageContentSources configuration
     echo ""
@@ -281,6 +361,7 @@ EOF
     echo -e "${GREEN}✅ Complete CI cluster image sync finished${NC}"
     echo "   Total operation summary:"
     echo "   ✅ Images synced: ${synced_count}"
+    echo "   ⏭️  Already existed: ${skipped_count}"
     echo "   ⚠️  Failed: ${failed_count}"
     echo "   📁 Sync directory: ${sync_dir}"
     echo "   📄 Image content sources: ${sync_dir}/imageContentSources.yaml"
@@ -289,6 +370,14 @@ EOF
     echo "   1. Use the imageContentSources.yaml in your install-config.yaml"
     echo "   2. Run ./07-prepare-install-config.sh to prepare installation"
     echo "   3. Run ./08-install-cluster.sh to install the cluster"
+    
+    # Return success if we synced most images
+    if [[ $synced_count -ge 15 ]]; then
+        return 0
+    else
+        echo -e "${YELLOW}⚠️  Warning: Only ${synced_count} images synced successfully${NC}"
+        return 1
+    fi
 }
 
 # Function to verify sync results
@@ -310,7 +399,7 @@ verify_sync_results() {
     
     # Check for critical OpenShift images
     local critical_found=0
-    local critical_images=("openshift/cli" "openshift/installer" "openshift/etcd")
+    local critical_images=("openshift/cli" "openshift/installer" "openshift/etcd" "openshift/console" "openshift/cluster-version-operator")
     
     echo ""
     echo "   Checking for critical OpenShift images:"
@@ -325,7 +414,7 @@ verify_sync_results() {
     
     # Overall assessment
     echo ""
-    if [[ $repo_count -ge 10 && $critical_found -ge 2 ]]; then
+    if [[ $repo_count -ge 15 && $critical_found -ge 4 ]]; then
         echo -e "${GREEN}✅ Image sync appears successful (${repo_count} repositories, ${critical_found}/${#critical_images[@]} critical images)${NC}"
     else
         echo -e "${YELLOW}⚠️  Image sync partially complete (${repo_count} repositories, ${critical_found}/${#critical_images[@]} critical images)${NC}"
@@ -409,6 +498,9 @@ main() {
     
     # Check prerequisites
     check_prerequisites
+    
+    # Check disk space
+    check_disk_space
     
     # Check registry status
     check_registry_status "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"
