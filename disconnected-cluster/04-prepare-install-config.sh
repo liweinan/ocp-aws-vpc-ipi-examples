@@ -207,40 +207,61 @@ additionalTrustBundle: |
 $(echo "$registry_cert" | sed 's/^/  /')
 imageContentSources:
 - mirrors:
-  - registry.$cluster_name.local:$registry_port/openshift/release
+  - localhost:$registry_port/openshift/release
   source: quay.io/openshift-release-dev/ocp-release
 - mirrors:
-  - registry.$cluster_name.local:$registry_port/openshift/release
+  - localhost:$registry_port/openshift/release
   source: quay.io/openshift-release-dev/ocp-v4.0-art-dev
 EOF
     
     echo -e "${GREEN}✅ install-config.yaml created${NC}"
 }
 
-# Function to download OpenShift installer from local registry
-download_installer() {
-    local install_dir="$1"
-    local cluster_name="$2"
-    local registry_port="$3"
+# Function to check registry status
+check_registry_status() {
+    local registry_port="$1"
     
-    if [[ ! -f "$install_dir/openshift-install" ]]; then
-        echo -e "${BLUE}📥 Downloading OpenShift installer from local registry...${NC}"
-        cd "$install_dir"
-        
-        # Pull installer image from local registry
-        podman pull registry.${cluster_name}.local:${registry_port}/openshift/release:4.18.15-x86_64-installer
-        
-        # Extract installer binary from image
-        podman run --rm -v .:/output registry.${cluster_name}.local:${registry_port}/openshift/release:4.18.15-x86_64-installer cp /usr/bin/openshift-install /output/
-        
-        chmod +x openshift-install
-        echo -e "${GREEN}✅ OpenShift installer downloaded from local registry${NC}"
+    echo -e "${BLUE}🔍 Checking registry status...${NC}"
+    
+    # Check if registry container is running
+    if podman ps --format "table {{.Names}}" | grep -q "registry"; then
+        echo -e "${GREEN}✅ Registry container is running${NC}"
     else
-        echo -e "${GREEN}✅ OpenShift installer already exists${NC}"
+        echo -e "${YELLOW}⚠️  Registry container is not running${NC}"
+        echo "   Run: ./02-setup-mirror-registry.sh to start the registry"
+        return 1
+    fi
+    
+    # Check if registry is accessible
+    if curl -k -s -u admin:admin123 https://localhost:${registry_port}/v2/_catalog > /dev/null 2>&1; then
+        echo -e "${GREEN}✅ Registry is accessible on localhost:${registry_port}${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Registry is not accessible on localhost:${registry_port}${NC}"
+        echo "   Check if the registry is properly configured and running"
+        return 1
     fi
 }
 
-# Function to validate install-config.yaml
+# Function to check OpenShift installer availability
+check_installer() {
+    local install_dir="$1"
+    
+    echo -e "${BLUE}🔍 Checking OpenShift installer availability...${NC}"
+    
+    if command -v openshift-install &> /dev/null; then
+        echo -e "${GREEN}✅ OpenShift installer found in PATH${NC}"
+        openshift-install version
+    elif [[ -f "$install_dir/openshift-install" ]]; then
+        echo -e "${GREEN}✅ OpenShift installer found in installation directory${NC}"
+        "$install_dir/openshift-install" version
+    else
+        echo -e "${YELLOW}⚠️  OpenShift installer not found in PATH or installation directory${NC}"
+        echo "   The installer should be available from previous steps (03-sync-images.sh)"
+        echo "   If needed, you can download it manually from the OpenShift mirror"
+    fi
+}
+
+# Function to validate and fix install-config.yaml
 validate_install_config() {
     local install_dir="$1"
     
@@ -249,8 +270,28 @@ validate_install_config() {
     
     # Check if install-config.yaml exists and is valid YAML
     if [[ -f "install-config.yaml" ]]; then
-        yq eval '.' install-config.yaml > /dev/null
-        echo -e "${GREEN}✅ install-config.yaml validation passed${NC}"
+        # Validate YAML syntax
+        if yq eval '.' install-config.yaml > /dev/null; then
+            echo -e "${GREEN}✅ install-config.yaml validation passed${NC}"
+        else
+            echo -e "${RED}❌ install-config.yaml has invalid YAML syntax${NC}"
+            exit 1
+        fi
+        
+        # Check and fix registry URL if needed
+        if grep -q "registry\..*\.local:5000" install-config.yaml; then
+            echo -e "${YELLOW}⚠️  Fixing registry URL to use localhost...${NC}"
+            sed -i 's/registry\.[^.]*\.local:5000/localhost:5000/g' install-config.yaml
+            echo -e "${GREEN}✅ Registry URL fixed to use localhost${NC}"
+        fi
+        
+        # Verify registry connectivity
+        echo -e "${BLUE}🔍 Verifying registry connectivity...${NC}"
+        if curl -k -s -u admin:admin123 https://localhost:5000/v2/_catalog > /dev/null 2>&1; then
+            echo -e "${GREEN}✅ Registry is accessible${NC}"
+        else
+            echo -e "${YELLOW}⚠️  Registry may not be accessible - check if it's running${NC}"
+        fi
     else
         echo -e "${RED}❌ install-config.yaml not found${NC}"
         exit 1
@@ -345,7 +386,7 @@ main() {
     echo "   Cluster Name: $CLUSTER_NAME"
     echo "   Base Domain: $BASE_DOMAIN"
     echo "   Region: $REGION"
-    echo "   Registry URL: registry.$CLUSTER_NAME.local:$REGISTRY_PORT"
+    echo "   Registry URL: localhost:$REGISTRY_PORT"
     echo "   Installation Directory: $INSTALL_DIR"
     echo "   SSH Key: $SSH_KEY"
     echo "   Dry Run: $DRY_RUN"
@@ -374,8 +415,11 @@ main() {
         # Create install-config.yaml
         create_install_config "$CLUSTER_NAME" "$BASE_DOMAIN" "$region" "$vpc_id" "$private_subnet_ids" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD" "$ssh_key_content" "$pull_secret_content" "$registry_cert" "$INSTALL_DIR"
         
-        # Download OpenShift installer
-        download_installer "$INSTALL_DIR" "$CLUSTER_NAME" "$REGISTRY_PORT"
+        # Check registry status
+        check_registry_status "$REGISTRY_PORT"
+        
+        # Check OpenShift installer availability
+        check_installer "$INSTALL_DIR"
         
         # Validate install-config.yaml
         validate_install_config "$INSTALL_DIR"
@@ -386,6 +430,11 @@ main() {
         echo -e "${BLUE}🚀 To start cluster installation:${NC}"
         echo "   cd $INSTALL_DIR"
         echo "   ./openshift-install create cluster --log-level=info"
+        echo ""
+        echo -e "${BLUE}🔍 Registry Status:${NC}"
+        echo "   - Registry URL: localhost:$REGISTRY_PORT"
+        echo "   - Registry should be accessible and contain OpenShift images"
+        echo "   - If registry issues occur, run: ./02-setup-mirror-registry.sh"
         echo ""
         echo -e "${YELLOW}📝 Important notes:${NC}"
         echo "   - Cluster will be installed in SNO (Single Node OpenShift) mode"
