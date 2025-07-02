@@ -9,7 +9,7 @@ set -euo pipefail
 DEFAULT_CLUSTER_NAME="disconnected-cluster"
 DEFAULT_REGION="us-east-1"
 DEFAULT_VPC_CIDR="10.0.0.0/16"
-DEFAULT_PRIVATE_SUBNETS=3
+DEFAULT_PRIVATE_SUBNETS=1
 DEFAULT_PUBLIC_SUBNETS=1
 DEFAULT_INSTANCE_TYPE="t3.medium"
 DEFAULT_AMI_OWNER="amazon"
@@ -23,8 +23,8 @@ usage() {
     echo "  --cluster-name        Cluster name (default: $DEFAULT_CLUSTER_NAME)"
     echo "  --region              AWS region (default: $DEFAULT_REGION)"
     echo "  --vpc-cidr            VPC CIDR block (default: $DEFAULT_VPC_CIDR)"
-    echo "  --private-subnets     Number of private subnets (default: $DEFAULT_PRIVATE_SUBNETS)"
-    echo "  --public-subnets      Number of public subnets (default: $DEFAULT_PUBLIC_SUBNETS)"
+    echo "  --private-subnets     Number of private subnets (default: $DEFAULT_PRIVATE_SUBNETS, recommended: 1 for testing)"
+    echo "  --public-subnets      Number of public subnets (default: $DEFAULT_PUBLIC_SUBNETS, recommended: 1 for testing)"
     echo "  --instance-type       Bastion instance type (default: $DEFAULT_INSTANCE_TYPE)"
     echo "  --output-dir          Output directory (default: $DEFAULT_OUTPUT_DIR)"
     echo "  --dry-run             Show what would be created without actually creating"
@@ -116,7 +116,7 @@ create_vpc_infrastructure() {
         --query 'AvailabilityZones[0:3].ZoneName' \
         --output text)
     
-    # Create public subnets
+    # Create public subnets (1 for testing, can be increased for production)
     echo "   Creating public subnets..."
     local public_subnet_ids=""
     local az_array=($azs)
@@ -164,7 +164,7 @@ create_vpc_infrastructure() {
     done
     public_subnet_ids=${public_subnet_ids%,}
     
-    # Create private subnets
+    # Create private subnets (1 for testing, can be increased for production)
     echo "   Creating private subnets..."
     local private_subnet_ids=""
     
