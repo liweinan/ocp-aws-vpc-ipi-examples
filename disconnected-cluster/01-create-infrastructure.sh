@@ -9,12 +9,13 @@ set -euo pipefail
 DEFAULT_CLUSTER_NAME="disconnected-cluster"
 DEFAULT_REGION="us-east-1"
 DEFAULT_VPC_CIDR="10.0.0.0/16"
-DEFAULT_PRIVATE_SUBNETS=3
+DEFAULT_PRIVATE_SUBNETS=1
 DEFAULT_PUBLIC_SUBNETS=1
 DEFAULT_INSTANCE_TYPE="t3.medium"
 DEFAULT_AMI_OWNER="amazon"
 DEFAULT_AMI_NAME="amzn2-ami-hvm-*-x86_64-gp2"
 DEFAULT_OUTPUT_DIR="./infra-output"
+DEFAULT_SNO_MODE="yes"
 
 # Function to display usage
 usage() {
@@ -23,16 +24,22 @@ usage() {
     echo "  --cluster-name        Cluster name (default: $DEFAULT_CLUSTER_NAME)"
     echo "  --region              AWS region (default: $DEFAULT_REGION)"
     echo "  --vpc-cidr            VPC CIDR block (default: $DEFAULT_VPC_CIDR)"
-    echo "  --private-subnets     Number of private subnets (default: $DEFAULT_PRIVATE_SUBNETS)"
+    echo "  --private-subnets     Number of private subnets (default: $DEFAULT_PRIVATE_SUBNETS for SNO)"
     echo "  --public-subnets      Number of public subnets (default: $DEFAULT_PUBLIC_SUBNETS)"
     echo "  --instance-type       Bastion instance type (default: $DEFAULT_INSTANCE_TYPE)"
     echo "  --output-dir          Output directory (default: $DEFAULT_OUTPUT_DIR)"
+    echo "  --sno                 Enable Single Node OpenShift (SNO) mode (default: enabled)"
+    echo "  --no-sno              Disable SNO mode for multi-node deployment"
     echo "  --dry-run             Show what would be created without actually creating"
     echo "  --help                Display this help message"
     echo ""
     echo "Examples:"
     echo "  $0 --cluster-name my-disconnected-cluster --region us-east-1"
+    echo "  $0 --sno --cluster-name my-sno-cluster"
+    echo "  $0 --no-sno --private-subnets 3 --cluster-name multi-node-cluster"
     echo "  $0 --dry-run --cluster-name test-cluster"
+    echo ""
+    echo "Note: SNO mode is enabled by default for cost-effective disconnected deployments"
     exit 1
 }
 
@@ -529,15 +536,25 @@ create_cluster_security_group() {
     local region="$2"
     local vpc_id="$3"
     local output_dir="$4"
+    local sno_mode="$5"
     
     echo "🏗️  Creating cluster security group..."
     
+    local sg_name="${cluster_name}-cluster-sg"
+    local sg_description="Security group for OpenShift cluster"
+    
+    if [[ "$sno_mode" == "yes" ]]; then
+        sg_name="${cluster_name}-sno-sg"
+        sg_description="Security group for Single Node OpenShift (SNO) cluster"
+        echo "   Configuring for Single Node OpenShift (SNO) deployment..."
+    fi
+    
     local cluster_sg_id=$(aws ec2 create-security-group \
-        --group-name "${cluster_name}-cluster-sg" \
-        --description "Security group for OpenShift cluster" \
+        --group-name "$sg_name" \
+        --description "$sg_description" \
         --vpc-id "$vpc_id" \
         --region "$region" \
-        --tag-specifications "ResourceType=security-group,Tags=[{Key=Name,Value=${cluster_name}-cluster-sg}]" \
+        --tag-specifications "ResourceType=security-group,Tags=[{Key=Name,Value=$sg_name}]" \
         --query 'GroupId' \
         --output text)
     
@@ -569,6 +586,9 @@ create_cluster_security_group() {
     
     echo "✅ Cluster security group created"
     echo "   Security Group ID: $cluster_sg_id"
+    if [[ "$sno_mode" == "yes" ]]; then
+        echo "   Configured for SNO deployment"
+    fi
 }
 
 # Main execution
@@ -604,6 +624,14 @@ main() {
                 OUTPUT_DIR="$2"
                 shift 2
                 ;;
+            --sno)
+                SNO_MODE="yes"
+                shift
+                ;;
+            --no-sno)
+                SNO_MODE="no"
+                shift
+                ;;
             --dry-run)
                 DRY_RUN="yes"
                 shift
@@ -627,6 +655,7 @@ main() {
     INSTANCE_TYPE=${INSTANCE_TYPE:-$DEFAULT_INSTANCE_TYPE}
     OUTPUT_DIR=${OUTPUT_DIR:-$DEFAULT_OUTPUT_DIR}
     DRY_RUN=${DRY_RUN:-no}
+    SNO_MODE=${SNO_MODE:-$DEFAULT_SNO_MODE}
     
     # Display script header
     echo "🚀 Disconnected Cluster Infrastructure Creation"
@@ -641,6 +670,7 @@ main() {
     echo "   Bastion Instance Type: $INSTANCE_TYPE"
     echo "   Output Directory: $OUTPUT_DIR"
     echo "   Dry Run: $DRY_RUN"
+    echo "   SNO Mode: $SNO_MODE"
     echo ""
     
     if [[ "$DRY_RUN" == "yes" ]]; then
@@ -650,6 +680,13 @@ main() {
         echo "  - VPC with CIDR $VPC_CIDR"
         echo "  - $PUBLIC_SUBNETS public subnet(s)"
         echo "  - $PRIVATE_SUBNETS private subnet(s)"
+        if [[ "$SNO_MODE" == "yes" ]]; then
+            echo "  - Optimized for Single Node OpenShift (SNO) deployment"
+            echo "  - Estimated cost: $20-40/day"
+        else
+            echo "  - Multi-node deployment configuration"
+            echo "  - Estimated cost: $50-100/day"
+        fi
         echo "  - No NAT Gateway (disconnected cluster)"
         echo "  - Bastion host ($INSTANCE_TYPE)"
         echo "  - Security groups"
@@ -674,10 +711,13 @@ main() {
     create_bastion_host "$CLUSTER_NAME" "$REGION" "$vpc_id" "$public_subnet_ids" "$INSTANCE_TYPE" "$OUTPUT_DIR" "$VPC_CIDR"
     
     # Create cluster security group
-    create_cluster_security_group "$CLUSTER_NAME" "$REGION" "$vpc_id" "$OUTPUT_DIR"
+    create_cluster_security_group "$CLUSTER_NAME" "$REGION" "$vpc_id" "$OUTPUT_DIR" "$SNO_MODE"
     
     echo ""
     echo "✅ Infrastructure creation completed successfully!"
+    if [[ "$SNO_MODE" == "yes" ]]; then
+        echo "🎯 Configured for Single Node OpenShift (SNO) deployment"
+    fi
     echo ""
     echo "📁 Output files saved to: $OUTPUT_DIR"
     echo "   vpc-id: VPC identifier"
@@ -689,6 +729,17 @@ main() {
     echo "🔗 Next steps:"
     echo "1. Connect to bastion host: ssh -i $OUTPUT_DIR/bastion-key.pem ubuntu@$(cat $OUTPUT_DIR/bastion-public-ip)"
     echo "2. Run: ./02-setup-mirror-registry.sh --cluster-name $CLUSTER_NAME"
+    if [[ "$SNO_MODE" == "yes" ]]; then
+        echo "   Use --sno flag for SNO-optimized configuration"
+    fi
+    if [[ "$SNO_MODE" == "yes" ]]; then
+        echo ""
+        echo "🎯 SNO-specific notes:"
+        echo "   - Single private subnet created for SNO node"
+        echo "   - Security group optimized for single node deployment"
+        echo "   - Use --sno flag in subsequent scripts for consistency"
+        echo "   - Estimated cost: $20-40/day (vs $50-100/day for multi-node)"
+    fi
     echo ""
     echo "⚠️  Important:"
     echo "   - Keep the SSH key file secure: $OUTPUT_DIR/bastion-key.pem"
