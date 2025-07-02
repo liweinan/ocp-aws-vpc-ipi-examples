@@ -20,9 +20,9 @@ scp -i "$SSH_KEY" -o StrictHostKeyChecking=no -r ./infra-output ubuntu@"$BASTION
 
 # 2. 拷贝安装相关脚本到 bastion
 printf "${BLUE}📦 拷贝安装相关脚本到 bastion...${NC}\n"
-scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./04-prepare-install-config.sh ubuntu@"$BASTION_IP":/home/ubuntu/
-scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./05-install-cluster.sh ubuntu@"$BASTION_IP":/home/ubuntu/ 2>/dev/null || echo "05-install-cluster.sh not found, skipping..."
-scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./06-verify-cluster.sh ubuntu@"$BASTION_IP":/home/ubuntu/ 2>/dev/null || echo "06-verify-cluster.sh not found, skipping..."
+scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./04-prepare-install-config.sh ubuntu@"$BASTION_IP":/home/ubuntu/disconnected-cluster/
+scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./05-install-cluster.sh ubuntu@"$BASTION_IP":/home/ubuntu/disconnected-cluster/ 2>/dev/null || echo "05-install-cluster.sh not found, skipping..."
+scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./06-verify-cluster.sh ubuntu@"$BASTION_IP":/home/ubuntu/disconnected-cluster/ 2>/dev/null || echo "06-verify-cluster.sh not found, skipping..."
 
 # 3. 在 bastion host 上安装依赖工具
 echo -e "${BLUE}🔧 在 bastion host 上安装依赖工具...${NC}"

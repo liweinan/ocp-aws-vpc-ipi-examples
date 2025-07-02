@@ -61,13 +61,18 @@ check_install_directory() {
         exit 1
     fi
     
-    if [[ ! -f "$install_dir/install-config.yaml" ]]; then
-        echo "❌ install-config.yaml not found in $install_dir"
+    # Check if install-config.yaml exists or if it was already consumed (manifests exist)
+    if [[ ! -f "$install_dir/install-config.yaml" ]] && [[ ! -d "$install_dir/manifests" ]]; then
+        echo "❌ install-config.yaml not found in $install_dir and no manifests directory"
         echo "Please run 04-prepare-install-config.sh first"
         exit 1
     fi
     
-    echo "✅ Installation directory and config found"
+    if [[ -f "$install_dir/install-config.yaml" ]]; then
+        echo "✅ Installation directory and config found"
+    elif [[ -d "$install_dir/manifests" ]]; then
+        echo "✅ Installation directory found with existing manifests (install-config.yaml was consumed)"
+    fi
 }
 
 # Function to check OpenShift installer
@@ -108,8 +113,15 @@ validate_install_config() {
     
     cd "$install_dir"
     
+    # If install-config.yaml was consumed, manifests should already exist
+    if [[ ! -f "install-config.yaml" ]] && [[ -d "manifests" ]]; then
+        echo "✅ install-config.yaml was already consumed, manifests exist"
+        cd - > /dev/null
+        return 0
+    fi
+    
     # Check if openshift-install can parse the config
-    if ! ./openshift-install create install-config --dir=. --dry-run >/dev/null 2>&1; then
+    if ! ./openshift-install create manifests --dir=. >/dev/null 2>&1; then
         echo "❌ install-config.yaml validation failed"
         echo "Please check the configuration and try again"
         exit 1
