@@ -114,7 +114,7 @@ get_pull_secret() {
         fi
     else
         local auth_string=$(echo -n "${registry_user}:${registry_password}" | base64)
-        echo "{\"auths\":{\"registry.${cluster_name}.local:${registry_port}\":{\"auth\":\"${auth_string}\"}}}"
+        echo "{\"auths\":{\"localhost:${registry_port}\":{\"auth\":\"${auth_string}\"}}}"
     fi
 }
 
