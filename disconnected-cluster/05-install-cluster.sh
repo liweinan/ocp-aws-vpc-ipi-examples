@@ -10,7 +10,7 @@ DEFAULT_CLUSTER_NAME="disconnected-cluster"
 DEFAULT_INSTALL_DIR="./openshift-install"
 DEFAULT_INFRA_OUTPUT_DIR="./infra-output"
 DEFAULT_OPENSHIFT_VERSION="4.18.15"
-DEFAULT_LOG_LEVEL="info"
+DEFAULT_LOG_LEVEL="debug"
 DEFAULT_WAIT_TIMEOUT="60"
 
 # Function to display usage
@@ -105,11 +105,11 @@ check_openshift_installer() {
     fi
 }
 
-# Function to validate install-config.yaml
+# Function to validate install-config.yaml and create manifests
 validate_install_config() {
     local install_dir="$1"
     
-    echo "🔍 Validating install-config.yaml..."
+    echo "🔍 Validating install-config.yaml and creating manifests..."
     
     cd "$install_dir"
     
@@ -120,16 +120,64 @@ validate_install_config() {
         return 0
     fi
     
-    # Check if openshift-install can parse the config
+    # Create manifests first
+    echo "   Creating manifests..."
     if ! ./openshift-install create manifests --dir=. >/dev/null 2>&1; then
-        echo "❌ install-config.yaml validation failed"
+        echo "❌ Failed to create manifests"
         echo "Please check the configuration and try again"
         exit 1
     fi
     
+    # Modify manifests for disconnected cluster
+    echo "   Modifying manifests for disconnected cluster..."
+    modify_manifests_for_disconnected "$install_dir"
+    
     cd - > /dev/null
     
-    echo "✅ install-config.yaml validation passed"
+    echo "✅ install-config.yaml validation and manifest creation completed"
+}
+
+# Function to modify manifests for disconnected cluster
+modify_manifests_for_disconnected() {
+    local install_dir="$1"
+    
+    echo "   Applying disconnected cluster manifest modifications..."
+    
+    # Create additional manifests for disconnected cluster
+    cat > "$install_dir/manifests/99-disconnected-cluster-config.yaml" <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: disconnected-cluster-config
+  namespace: openshift-config
+data:
+  registry-url: "localhost:5000"
+  registry-user: "admin"
+  cluster-type: "disconnected"
+EOF
+    
+    # Create network policy to allow registry access
+    cat > "$install_dir/manifests/99-registry-network-policy.yaml" <<EOF
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-registry-access
+  namespace: openshift-image-registry
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: openshift-image-registry
+    ports:
+    - protocol: TCP
+      port: 5000
+EOF
+    
+    echo "   ✅ Disconnected cluster manifest modifications applied"
 }
 
 # Function to check AWS credentials
