@@ -109,11 +109,11 @@ copy_installation_scripts() {
     
     # Copy all installation scripts
     local scripts=(
-        "02-setup-mirror-registry.sh"
-        "03-sync-images.sh"
-        "04-prepare-install-config.sh"
-        "05-install-cluster.sh"
-        "06-verify-cluster.sh"
+        "04-setup-mirror-registry.sh"
+        "05-sync-images.sh"
+        "07-prepare-install-config.sh"
+        "08-install-cluster.sh"
+        "09-verify-cluster.sh"
     )
     
     for script in "${scripts[@]}"; do
@@ -198,9 +198,9 @@ main() {
     echo ""
     echo -e "${BLUE}📋 Next steps:${NC}"
     echo "   1. SSH to bastion host: ssh -i ./infra-output/bastion-key.pem ubuntu@$(cat ./infra-output/bastion-public-ip)"
-    echo "   2. Run 02-setup-mirror-registry.sh to set up the local registry"
-    echo "   3. Run 03-sync-images.sh to sync OpenShift images"
-    echo "   4. Run 04-prepare-install-config.sh to prepare installation"
+    echo "   2. Run 04-setup-mirror-registry.sh to set up the local registry"
+    echo "   3. Run 05-sync-images.sh to sync OpenShift images"
+    echo "   4. Run 07-prepare-install-config.sh to prepare installation"
     echo ""
     echo -e "${YELLOW}⚠️  Security note:${NC}"
     echo "   - Credentials are copied to bastion host for installation use"

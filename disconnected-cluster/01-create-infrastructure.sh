@@ -792,7 +792,7 @@ main() {
     create_vpc_infrastructure "$CLUSTER_NAME" "$REGION" "$VPC_CIDR" "$PRIVATE_SUBNETS" "$PUBLIC_SUBNETS" "$OUTPUT_DIR"
     
     # Note: Bastion host and cluster security group creation moved to separate script
-    # Run ./01.5-create-bastion.sh to create bastion host and security groups
+    # Run ./02-create-bastion.sh to create bastion host and security groups
     
     echo ""
     echo "✅ VPC infrastructure creation completed successfully!"
@@ -809,11 +809,11 @@ main() {
     echo "   vpc-cidr: VPC CIDR block"
     echo ""
     echo "🔗 Next steps:"
-    echo "1. Create bastion host: ./01.5-create-bastion.sh --cluster-name $CLUSTER_NAME"
+    echo "1. Create bastion host: ./02-create-bastion.sh --cluster-name $CLUSTER_NAME"
     if [[ "$SNO_MODE" == "yes" ]]; then
         echo "   Use --sno flag for SNO-optimized configuration"
     fi
-    echo "2. Setup mirror registry: ./02-setup-mirror-registry.sh --cluster-name $CLUSTER_NAME"
+    echo "2. Setup mirror registry: ./04-setup-mirror-registry.sh --cluster-name $CLUSTER_NAME"
     if [[ "$SNO_MODE" == "yes" ]]; then
         echo ""
         echo "🎯 SNO-specific notes:"
