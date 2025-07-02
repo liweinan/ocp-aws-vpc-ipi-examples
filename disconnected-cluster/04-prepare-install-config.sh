@@ -103,10 +103,9 @@ get_pull_secret() {
     local registry_user="$4"
     local registry_password="$5"
     
-    # 只输出 JSON，不输出提示
-    if [[ -f "/home/ubuntu/pull-secret.json" ]]; then
-        cat "/home/ubuntu/pull-secret.json"
-    elif [[ -n "$pull_secret_input" ]]; then
+    # 对于disconnected cluster，强制生成新的pull secret
+    # 忽略现有的pull-secret.json文件
+    if [[ -n "$pull_secret_input" ]]; then
         if [[ -f "$pull_secret_input" ]]; then
             cat "$pull_secret_input"
         else
