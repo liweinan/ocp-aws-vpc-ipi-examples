@@ -127,6 +127,24 @@ check_openshift_installer() {
     echo "✅ OpenShift installer downloaded"
 }
 
+# Function to backup install-config.yaml
+backup_install_config() {
+    local install_dir="$1"
+    
+    echo "💾 Backing up install-config.yaml..."
+    
+    cd "$install_dir"
+    
+    if [[ -f "install-config.yaml" ]]; then
+        cp install-config.yaml install-config.yaml.backup
+        echo "✅ install-config.yaml backed up to install-config.yaml.backup"
+    else
+        echo "⚠️  install-config.yaml not found, skipping backup"
+    fi
+    
+    cd - > /dev/null
+}
+
 # Function to validate install-config.yaml and create manifests
 validate_install_config() {
     local install_dir="$1"
@@ -141,6 +159,9 @@ validate_install_config() {
         cd - > /dev/null
         return 0
     fi
+    
+    # Backup install-config.yaml before it gets consumed
+    backup_install_config "$install_dir"
     
     # Create manifests first
     echo "   Creating manifests..."

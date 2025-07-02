@@ -297,6 +297,82 @@ validate_install_config() {
     fi
 }
 
+# Function to backup install-config.yaml
+backup_install_config() {
+    local install_dir="$1"
+    
+    echo -e "${BLUE}💾 Backing up install-config.yaml...${NC}"
+    cd "$install_dir"
+    
+    if [[ -f "install-config.yaml" ]]; then
+        cp install-config.yaml install-config.yaml.backup
+        echo -e "${GREEN}✅ install-config.yaml backed up to install-config.yaml.backup${NC}"
+    else
+        echo -e "${YELLOW}⚠️  install-config.yaml not found, skipping backup${NC}"
+    fi
+}
+
+# Function to create and validate manifests
+create_and_validate_manifests() {
+    local install_dir="$1"
+    
+    echo -e "${BLUE}🔧 Creating manifests...${NC}"
+    cd "$install_dir"
+    
+    # Create manifests
+    if AWS_PROFILE=static openshift-install create manifests; then
+        echo -e "${GREEN}✅ Manifests created successfully${NC}"
+    else
+        echo -e "${RED}❌ Failed to create manifests${NC}"
+        exit 1
+    fi
+    
+    # Validate key manifest files
+    echo -e "${BLUE}🔍 Validating key manifest files...${NC}"
+    
+    # Check if manifests directory exists
+    if [[ ! -d "manifests" ]]; then
+        echo -e "${RED}❌ Manifests directory not found${NC}"
+        exit 1
+    fi
+    
+    # Validate image content source policy
+    if [[ -f "manifests/image-content-source-policy.yaml" ]]; then
+        echo -e "${GREEN}✅ Image content source policy created${NC}"
+        # Verify it contains localhost:5000
+        if grep -q "localhost:5000" manifests/image-content-source-policy.yaml; then
+            echo -e "${GREEN}✅ Image content source policy contains localhost:5000${NC}"
+        else
+            echo -e "${RED}❌ Image content source policy missing localhost:5000${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${RED}❌ Image content source policy not found${NC}"
+        exit 1
+    fi
+    
+    # Validate pull secret
+    if [[ -f "manifests/openshift-config-secret-pull-secret.yaml" ]]; then
+        echo -e "${GREEN}✅ Pull secret manifest created${NC}"
+        # Verify it contains localhost:5000
+        if grep -q "localhost:5000" manifests/openshift-config-secret-pull-secret.yaml; then
+            echo -e "${GREEN}✅ Pull secret contains localhost:5000${NC}"
+        else
+            echo -e "${RED}❌ Pull secret missing localhost:5000${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${RED}❌ Pull secret manifest not found${NC}"
+        exit 1
+    fi
+    
+    # List all manifest files
+    echo -e "${BLUE}📋 Generated manifest files:${NC}"
+    ls -la manifests/
+    
+    echo -e "${GREEN}✅ Manifest validation completed${NC}"
+}
+
 # Main execution
 main() {
     # Parse command line arguments
@@ -420,8 +496,14 @@ main() {
         # Check OpenShift installer availability
         check_installer "$INSTALL_DIR"
         
+        # Backup install-config.yaml before it gets consumed
+        backup_install_config "$INSTALL_DIR"
+        
         # Validate install-config.yaml
         validate_install_config "$INSTALL_DIR"
+        
+        # Create and validate manifests
+        create_and_validate_manifests "$INSTALL_DIR"
         
         echo ""
         echo -e "${GREEN}✅ Install config preparation completed on bastion host!${NC}"
@@ -434,6 +516,11 @@ main() {
         echo "   - Registry URL: localhost:$REGISTRY_PORT"
         echo "   - Registry should be accessible and contain OpenShift images"
         echo "   - If registry issues occur, run: ./02-setup-mirror-registry.sh"
+        echo ""
+        echo -e "${BLUE}📋 Manifest Status:${NC}"
+        echo "   - Manifests created and validated in $INSTALL_DIR/manifests/"
+        echo "   - install-config.yaml backed up to install-config.yaml.backup"
+        echo "   - Image content source policy and pull secret verified"
         echo ""
         echo -e "${YELLOW}📝 Important notes:${NC}"
         echo "   - Cluster will be installed in SNO (Single Node OpenShift) mode"

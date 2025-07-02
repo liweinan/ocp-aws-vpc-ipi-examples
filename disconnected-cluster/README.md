@@ -104,9 +104,34 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 - **日志存储**: 本地存储
 - **备份**: 可选的S3备份
 
-### Manifest配置
+### Manifest配置和验证
 
-对于disconnected cluster，`05-install-cluster.sh`脚本会自动创建和修改必要的manifests：
+对于disconnected cluster，`04-prepare-install-config.sh`和`05-install-cluster.sh`脚本会自动创建、验证和修改必要的manifests。
+
+#### 04脚本的Manifest处理
+
+`04-prepare-install-config.sh`脚本现在包含完整的manifest创建和验证流程：
+
+1. **备份install-config.yaml**
+   ```bash
+   # 在创建manifests之前自动备份
+   cp install-config.yaml install-config.yaml.backup
+   ```
+
+2. **创建manifests**
+   ```bash
+   # 使用AWS_PROFILE=static确保凭证正确
+   AWS_PROFILE=static openshift-install create manifests
+   ```
+
+3. **验证关键manifest文件**
+   - **image-content-source-policy.yaml**: 验证镜像内容源策略
+   - **openshift-config-secret-pull-secret.yaml**: 验证pull secret配置
+   - **网络配置**: 验证subnet和VPC配置
+
+#### 05脚本的Manifest处理
+
+`05-install-cluster.sh`脚本会进一步修改manifests以支持disconnected环境：
 
 #### 自动创建的Manifests
 
@@ -120,20 +145,65 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
    - 确保集群内服务可以访问本地镜像仓库
    - 应用在`openshift-image-registry`命名空间
 
-#### Manifest修改过程
+#### Manifest验证检查清单
+
+在运行安装之前，脚本会自动验证以下内容：
 
 ```bash
-# 1. 创建基础manifests
-openshift-install create manifests --dir=.
+# 1. 验证install-config.yaml语法
+yq eval '.' install-config.yaml
 
-# 2. 应用disconnected cluster特定配置
-# - 添加镜像仓库访问策略
-# - 配置集群类型标识
-# - 设置网络策略
+# 2. 验证镜像仓库可访问性
+curl -k -s -u admin:admin123 https://localhost:5000/v2/_catalog
 
-# 3. 验证manifests
-openshift-install validate manifests --dir=.
+# 3. 验证image content source policy
+grep "localhost:5000" manifests/image-content-source-policy.yaml
+
+# 4. 验证pull secret
+grep "localhost:5000" manifests/openshift-config-secret-pull-secret.yaml
+
+# 5. 验证网络配置
+grep "subnet-" manifests/cluster-config.yaml
 ```
+
+#### 手动验证Manifests
+
+如果需要手动验证manifests，可以使用以下命令：
+
+```bash
+# 检查manifest文件结构
+ls -la openshift-install/manifests/
+
+# 验证image content source policy
+cat openshift-install/manifests/image-content-source-policy.yaml
+
+# 验证pull secret（解码查看内容）
+echo "eyJhdXRocyI6eyJsb2NhbGhvc3Q6NTAwMCI6eyJhdXRoIjoiWVdSdGFXNDZZV1J0YVc0eE1qTT0ifX19" | base64 -d | jq .
+
+# 验证网络配置
+grep -A 10 -B 5 'subnet' openshift-install/manifests/cluster-config.yaml
+```
+
+#### 常见Manifest问题及解决方案
+
+1. **imageContentSources已弃用警告**
+   ```
+   level=warning msg=imageContentSources is deprecated, please use ImageDigestSources
+   ```
+   - 这是正常的警告，当前配置仍然有效
+   - 新版本推荐使用ImageDigestSources，但向后兼容
+
+2. **Pull Secret不包含localhost:5000**
+   - 确保04脚本正确生成了包含localhost:5000的pull secret
+   - 检查registry认证信息是否正确
+
+3. **网络配置错误**
+   - 验证subnet ID是否正确
+   - 确认VPC和region配置匹配
+
+4. **证书验证失败**
+   - 检查additionalTrustBundle配置
+   - 验证registry证书是否正确
 
 #### 调试模式
 
