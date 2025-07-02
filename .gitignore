@@ -89,3 +89,31 @@ backup.sh
 
 # Backup directories
 backups/
+
+# Ignore log, report, and output files
+*.log
+*.txt
+out.txt
+infra-output/
+cleanup-*.txt
+verification-report-*.txt
+cleanup-report-*.txt
+
+# Ignore editor/OS files
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Ignore AWS credentials and sensitive data
+*.pem
+*.key
+*.crt
+aws-credentials
+pull-secret.json
+
+# Ignore temporary files
+*.tmp
+*.temp
+temp/
+tmp/
