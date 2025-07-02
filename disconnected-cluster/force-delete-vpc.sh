@@ -24,6 +24,24 @@ delete_vpc_resources() {
     
     echo "🔍 Checking VPC dependencies..."
     
+    # Delete Load Balancers
+    echo "   Deleting Load Balancers..."
+    local load_balancers=$(aws elbv2 describe-load-balancers \
+        --region "$region" \
+        --query 'LoadBalancers[?VpcId==`'$vpc_id'`].LoadBalancerArn' \
+        --output text 2>/dev/null || echo "")
+    
+    if [[ -n "$load_balancers" ]]; then
+        for lb_arn in $load_balancers; do
+            echo "     Deleting Load Balancer: $lb_arn"
+            aws elbv2 delete-load-balancer --load-balancer-arn "$lb_arn" --region "$region" 2>/dev/null || true
+        done
+        
+        # Wait for Load Balancers to be deleted
+        echo "     Waiting for Load Balancers to be deleted..."
+        sleep 30
+    fi
+    
     # Delete NAT Gateways
     echo "   Deleting NAT Gateways..."
     local nat_gateways=$(aws ec2 describe-nat-gateways \
@@ -90,6 +108,21 @@ delete_vpc_resources() {
         done
     fi
     
+    # Disassociate main route table from VPC
+    echo "   Disassociating main route table..."
+    local main_route_table_assoc=$(aws ec2 describe-route-tables \
+        --region "$region" \
+        --filter "Name=vpc-id,Values=$vpc_id" "Name=association.main,Values=true" \
+        --query 'RouteTables[0].Associations[?Main==`true`].RouteTableAssociationId' \
+        --output text 2>/dev/null || echo "")
+    
+    if [[ -n "$main_route_table_assoc" && "$main_route_table_assoc" != "None" ]]; then
+        echo "     Disassociating main route table: $main_route_table_assoc"
+        aws ec2 disassociate-route-table --association-id "$main_route_table_assoc" --region "$region" 2>/dev/null || true
+        echo "     Waiting for route table disassociation..."
+        sleep 5
+    fi
+    
     # Delete Security Groups (except default)
     echo "   Deleting Security Groups..."
     local security_groups=$(aws ec2 describe-security-groups \
@@ -100,9 +133,48 @@ delete_vpc_resources() {
     
     if [[ -n "$security_groups" ]]; then
         for sg_id in $security_groups; do
+            echo "     Removing rules from Security Group: $sg_id"
+            
+            # Remove all ingress rules
+            aws ec2 revoke-security-group-ingress --group-id "$sg_id" --protocol all --port -1 --cidr 0.0.0.0/0 --region "$region" 2>/dev/null || true
+            
+            # Remove all egress rules
+            aws ec2 revoke-security-group-egress --group-id "$sg_id" --protocol all --port -1 --cidr 0.0.0.0/0 --region "$region" 2>/dev/null || true
+            
+            # Remove all security group references
+            local ingress_rules=$(aws ec2 describe-security-groups --group-ids "$sg_id" --region "$region" --query 'SecurityGroups[0].IpPermissions[?length(UserIdGroupPairs)>`0`]' --output json 2>/dev/null || echo "[]")
+            if [[ "$ingress_rules" != "[]" ]]; then
+                echo "       Removing ingress security group references..."
+                aws ec2 revoke-security-group-ingress --group-id "$sg_id" --ip-permissions "$ingress_rules" --region "$region" 2>/dev/null || true
+            fi
+            
+            local egress_rules=$(aws ec2 describe-security-groups --group-ids "$sg_id" --region "$region" --query 'SecurityGroups[0].IpPermissionsEgress[?length(UserIdGroupPairs)>`0`]' --output json 2>/dev/null || echo "[]")
+            if [[ "$egress_rules" != "[]" ]]; then
+                echo "       Removing egress security group references..."
+                aws ec2 revoke-security-group-egress --group-id "$sg_id" --ip-permissions "$egress_rules" --region "$region" 2>/dev/null || true
+            fi
+            
             echo "     Deleting Security Group: $sg_id"
             aws ec2 delete-security-group --group-id "$sg_id" --region "$region" 2>/dev/null || true
         done
+    fi
+    
+    # Clean up default security group rules (but don't delete the group itself)
+    echo "   Cleaning up default security group rules..."
+    local default_sg=$(aws ec2 describe-security-groups \
+        --region "$region" \
+        --filter "Name=vpc-id,Values=$vpc_id" "Name=group-name,Values=default" \
+        --query 'SecurityGroups[0].GroupId' \
+        --output text 2>/dev/null || echo "")
+    
+    if [[ -n "$default_sg" && "$default_sg" != "None" ]]; then
+        echo "     Removing rules from default Security Group: $default_sg"
+        
+        # Remove all ingress rules except the self-referencing one
+        aws ec2 revoke-security-group-ingress --group-id "$default_sg" --protocol all --port -1 --cidr 0.0.0.0/0 --region "$region" 2>/dev/null || true
+        
+        # Remove all egress rules
+        aws ec2 revoke-security-group-egress --group-id "$default_sg" --protocol all --port -1 --cidr 0.0.0.0/0 --region "$region" 2>/dev/null || true
     fi
     
     # Delete Subnets
@@ -115,6 +187,25 @@ delete_vpc_resources() {
     
     if [[ -n "$subnets" ]]; then
         for subnet_id in $subnets; do
+            echo "     Checking dependencies for Subnet: $subnet_id"
+            
+            # Check for network interfaces in the subnet
+            local network_interfaces=$(aws ec2 describe-network-interfaces \
+                --region "$region" \
+                --filters "Name=subnet-id,Values=$subnet_id" \
+                --query 'NetworkInterfaces[].NetworkInterfaceId' \
+                --output text 2>/dev/null || echo "")
+            
+            if [[ -n "$network_interfaces" ]]; then
+                echo "       Found network interfaces, deleting them first..."
+                for eni_id in $network_interfaces; do
+                    echo "         Deleting Network Interface: $eni_id"
+                    aws ec2 delete-network-interface --network-interface-id "$eni_id" --region "$region" 2>/dev/null || true
+                done
+                echo "       Waiting for network interfaces to be deleted..."
+                sleep 10
+            fi
+            
             echo "     Deleting Subnet: $subnet_id"
             aws ec2 delete-subnet --subnet-id "$subnet_id" --region "$region" 2>/dev/null || true
         done
@@ -134,6 +225,19 @@ delete_vpc_resources() {
         
         echo "     Deleting Internet Gateway: $igw_id"
         aws ec2 delete-internet-gateway --internet-gateway-id "$igw_id" --region "$region" 2>/dev/null || true
+    fi
+    
+    # Disassociate VPC from DHCP options (if not default)
+    echo "   Checking DHCP options association..."
+    local dhcp_options_id=$(aws ec2 describe-vpcs \
+        --vpc-ids "$vpc_id" \
+        --region "$region" \
+        --query 'Vpcs[0].DhcpOptionsId' \
+        --output text 2>/dev/null || echo "")
+    
+    if [[ -n "$dhcp_options_id" && "$dhcp_options_id" != "None" && "$dhcp_options_id" != "default" ]]; then
+        echo "     Disassociating VPC from DHCP options: $dhcp_options_id"
+        aws ec2 associate-dhcp-options --vpc-id "$vpc_id" --dhcp-options-id default --region "$region" 2>/dev/null || true
     fi
     
     # Delete VPC
