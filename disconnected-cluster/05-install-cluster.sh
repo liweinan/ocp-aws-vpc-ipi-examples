@@ -80,29 +80,51 @@ check_openshift_installer() {
     local install_dir="$1"
     local openshift_version="$2"
     
-    if [[ ! -f "$install_dir/openshift-install" ]]; then
-        echo "📥 OpenShift installer not found, downloading version $openshift_version..."
-        
-        cd "$install_dir"
-        
-        # Download installer
-        wget -q "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/$openshift_version/openshift-install-linux.tar.gz"
-        tar xzf openshift-install-linux.tar.gz
-        chmod +x openshift-install
-        rm openshift-install-linux.tar.gz
-        
-        # Download oc client
-        wget -q "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/$openshift_version/openshift-client-linux.tar.gz"
-        tar xzf openshift-client-linux.tar.gz
-        chmod +x oc kubectl
-        rm openshift-client-linux.tar.gz
-        
-        cd - > /dev/null
-        
-        echo "✅ OpenShift installer downloaded"
-    else
-        echo "✅ OpenShift installer found"
+    # First check if openshift-install is in PATH
+    if command -v openshift-install >/dev/null 2>&1; then
+        local version=$(openshift-install version | head -n1)
+        echo "✅ OpenShift installer found in PATH: $version"
+        # Create symlink in install directory for consistency
+        ln -sf $(which openshift-install) "$install_dir/openshift-install"
+        return 0
     fi
+    
+    # Check if openshift-install exists in install directory
+    if [[ -f "$install_dir/openshift-install" ]]; then
+        local version=$("$install_dir/openshift-install" version | head -n1)
+        echo "✅ OpenShift installer found in install directory: $version"
+        return 0
+    fi
+    
+    # Check if openshift-install exists in /usr/local/bin
+    if [[ -f "/usr/local/bin/openshift-install" ]]; then
+        local version=$(/usr/local/bin/openshift-install version | head -n1)
+        echo "✅ OpenShift installer found in /usr/local/bin: $version"
+        # Create symlink in install directory for consistency
+        ln -sf /usr/local/bin/openshift-install "$install_dir/openshift-install"
+        return 0
+    fi
+    
+    # Download OpenShift installer only if not found anywhere
+    echo "📥 OpenShift installer not found, downloading version $openshift_version..."
+    
+    cd "$install_dir"
+    
+    # Download installer
+    wget -q "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/$openshift_version/openshift-install-linux.tar.gz"
+    tar xzf openshift-install-linux.tar.gz
+    chmod +x openshift-install
+    rm openshift-install-linux.tar.gz
+    
+    # Download oc client
+    wget -q "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/$openshift_version/openshift-client-linux.tar.gz"
+    tar xzf openshift-client-linux.tar.gz
+    chmod +x oc kubectl
+    rm openshift-client-linux.tar.gz
+    
+    cd - > /dev/null
+    
+    echo "✅ OpenShift installer downloaded"
 }
 
 # Function to validate install-config.yaml and create manifests

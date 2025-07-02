@@ -16,7 +16,7 @@ NC='\033[0m'
 
 # 1. 拷贝 infra-output 目录
 printf "${BLUE}📦 拷贝 infra-output 到 bastion...${NC}\n"
-scp -i "$SSH_KEY" -o StrictHostKeyChecking=no -r ./infra-output ubuntu@"$BASTION_IP":/home/ubuntu/
+scp -i "$SSH_KEY" -o StrictHostKeyChecking=no -r ./infra-output ubuntu@"$BASTION_IP":/home/ubuntu/disconnected-cluster/
 
 # 2. 拷贝安装相关脚本到 bastion
 printf "${BLUE}📦 拷贝安装相关脚本到 bastion...${NC}\n"
