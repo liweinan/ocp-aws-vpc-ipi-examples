@@ -558,7 +558,7 @@ main() {
     echo "   - Control plane nodes (3x m5.xlarge)"
     echo "   - Compute nodes (3x m5.xlarge)"
     echo "   - Associated AWS resources (load balancers, security groups, etc.)"
-    echo "   - Estimated cost: $50-100 per day"
+    echo "   - Estimated cost: \$50-100 per day"
     echo ""
     read -p "Do you want to proceed with the installation? (y/N): " -n 1 -r
     echo
