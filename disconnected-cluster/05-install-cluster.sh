@@ -197,7 +197,7 @@ check_registry_access() {
     # Check if we're running on bastion host (registry should be local)
     if [[ -f "/opt/registry/certs/domain.crt" ]]; then
         # We're on bastion host, check local registry
-        if curl -k -s "https://registry.$cluster_name.local:5000/v2/_catalog" >/dev/null 2>&1; then
+        if curl -k -s -u admin:admin123 "https://localhost:5000/v2/_catalog" >/dev/null 2>&1; then
             echo "✅ Local registry access working"
         else
             echo "⚠️  Local registry access test failed"
