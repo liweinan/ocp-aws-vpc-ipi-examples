@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # Default values
-DEFAULT_CLUSTER_NAME="disconnected-cluster"
+DEFAULT_CLUSTER_NAME="disconnected-cluster-$(date +%s)-$(openssl rand -hex 4)"
 DEFAULT_INSTALL_DIR="./openshift-install"
 DEFAULT_INFRA_OUTPUT_DIR="./infra-output"
 DEFAULT_OPENSHIFT_VERSION="4.18.15"
@@ -30,6 +30,14 @@ usage() {
     echo "  $0 --cluster-name my-cluster"
     echo "  $0 --log-level debug --wait-timeout 90"
     exit 1
+}
+
+# Function to generate unique cluster name
+generate_unique_cluster_name() {
+    local base_name="disconnected-cluster"
+    local timestamp=$(date +%s)
+    local random_suffix=$(openssl rand -hex 4 2>/dev/null || echo "random")
+    echo "${base_name}-${timestamp}-${random_suffix}"
 }
 
 # Function to check prerequisites
@@ -360,9 +368,9 @@ perform_cluster_installation() {
     echo "   - 'YES/NO' → YES"
     echo ""
     echo "💰 Estimated costs:"
-    echo "   - Compute nodes (3x m5.xlarge): ~$50-100 per day"
+    echo "   - Compute nodes (3x m5.xlarge): ~\$50-100 per day"
     echo "   - Associated AWS resources (load balancers, security groups, etc.)"
-    echo "   - Total estimated cost: $50-100 per day"
+    echo "   - Total estimated cost: \$50-100 per day"
     echo ""
     echo "⏳ Starting installation (auto-answering all prompts with 'yes')..."
     echo ""
@@ -614,7 +622,7 @@ main() {
     done
     
     # Set default values
-    CLUSTER_NAME=${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}
+    CLUSTER_NAME=${CLUSTER_NAME:-$(generate_unique_cluster_name)}
     INSTALL_DIR=${INSTALL_DIR:-$DEFAULT_INSTALL_DIR}
     INFRA_OUTPUT_DIR=${INFRA_OUTPUT_DIR:-$DEFAULT_INFRA_OUTPUT_DIR}
     OPENSHIFT_VERSION=${OPENSHIFT_VERSION:-$DEFAULT_OPENSHIFT_VERSION}

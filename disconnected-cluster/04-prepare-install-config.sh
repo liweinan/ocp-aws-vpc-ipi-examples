@@ -103,18 +103,9 @@ get_pull_secret() {
     local registry_user="$4"
     local registry_password="$5"
     
-    # 对于disconnected cluster，强制生成新的pull secret
-    # 忽略现有的pull-secret.json文件
-    if [[ -n "$pull_secret_input" ]]; then
-        if [[ -f "$pull_secret_input" ]]; then
-            cat "$pull_secret_input"
-        else
-            echo "$pull_secret_input"
-        fi
-    else
-        local auth_string=$(echo -n "${registry_user}:${registry_password}" | base64)
-        echo "{\"auths\":{\"localhost:${registry_port}\":{\"auth\":\"${auth_string}\"}}}"
-    fi
+    # 始终只生成localhost:5000的pull secret，忽略传入参数
+    local auth_string=$(echo -n "${registry_user}:${registry_password}" | base64)
+    echo "{\"auths\":{\"localhost:${registry_port}\":{\"auth\":\"${auth_string}\"}}}"
 }
 
 # Function to get infrastructure information
@@ -265,12 +256,11 @@ validate_install_config() {
     local install_dir="$1"
     
     echo -e "${BLUE}🔍 Validating install-config.yaml...${NC}"
-    cd "$install_dir"
     
     # Check if install-config.yaml exists and is valid YAML
-    if [[ -f "install-config.yaml" ]]; then
+    if [[ -f "$install_dir/install-config.yaml" ]]; then
         # Validate YAML syntax
-        if yq eval '.' install-config.yaml > /dev/null; then
+        if yq eval '.' "$install_dir/install-config.yaml" > /dev/null; then
             echo -e "${GREEN}✅ install-config.yaml validation passed${NC}"
         else
             echo -e "${RED}❌ install-config.yaml has invalid YAML syntax${NC}"
@@ -278,9 +268,9 @@ validate_install_config() {
         fi
         
         # Check and fix registry URL if needed
-        if grep -q "registry\..*\.local:5000" install-config.yaml; then
+        if grep -q "registry\..*\.local:5000" "$install_dir/install-config.yaml"; then
             echo -e "${YELLOW}⚠️  Fixing registry URL to use localhost...${NC}"
-            sed -i 's/registry\.[^.]*\.local:5000/localhost:5000/g' install-config.yaml
+            sed -i 's/registry\.[^.]*\.local:5000/localhost:5000/g' "$install_dir/install-config.yaml"
             echo -e "${GREEN}✅ Registry URL fixed to use localhost${NC}"
         fi
         
@@ -302,10 +292,9 @@ backup_install_config() {
     local install_dir="$1"
     
     echo -e "${BLUE}💾 Backing up install-config.yaml...${NC}"
-    cd "$install_dir"
     
-    if [[ -f "install-config.yaml" ]]; then
-        cp install-config.yaml install-config.yaml.backup
+    if [[ -f "$install_dir/install-config.yaml" ]]; then
+        cp "$install_dir/install-config.yaml" "$install_dir/install-config.yaml.backup"
         echo -e "${GREEN}✅ install-config.yaml backed up to install-config.yaml.backup${NC}"
     else
         echo -e "${YELLOW}⚠️  install-config.yaml not found, skipping backup${NC}"
@@ -317,10 +306,9 @@ create_and_validate_manifests() {
     local install_dir="$1"
     
     echo -e "${BLUE}🔧 Creating manifests...${NC}"
-    cd "$install_dir"
     
     # Create manifests
-    if AWS_PROFILE=static openshift-install create manifests; then
+    if AWS_PROFILE=static openshift-install create manifests --dir="$install_dir"; then
         echo -e "${GREEN}✅ Manifests created successfully${NC}"
     else
         echo -e "${RED}❌ Failed to create manifests${NC}"
@@ -331,16 +319,16 @@ create_and_validate_manifests() {
     echo -e "${BLUE}🔍 Validating key manifest files...${NC}"
     
     # Check if manifests directory exists
-    if [[ ! -d "manifests" ]]; then
+    if [[ ! -d "$install_dir/manifests" ]]; then
         echo -e "${RED}❌ Manifests directory not found${NC}"
         exit 1
     fi
     
     # Validate image content source policy
-    if [[ -f "manifests/image-content-source-policy.yaml" ]]; then
+    if [[ -f "$install_dir/manifests/image-content-source-policy.yaml" ]]; then
         echo -e "${GREEN}✅ Image content source policy created${NC}"
         # Verify it contains localhost:5000
-        if grep -q "localhost:5000" manifests/image-content-source-policy.yaml; then
+        if grep -q "localhost:5000" "$install_dir/manifests/image-content-source-policy.yaml"; then
             echo -e "${GREEN}✅ Image content source policy contains localhost:5000${NC}"
         else
             echo -e "${RED}❌ Image content source policy missing localhost:5000${NC}"
@@ -352,10 +340,11 @@ create_and_validate_manifests() {
     fi
     
     # Validate pull secret
-    if [[ -f "manifests/openshift-config-secret-pull-secret.yaml" ]]; then
+    if [[ -f "$install_dir/manifests/openshift-config-secret-pull-secret.yaml" ]]; then
         echo -e "${GREEN}✅ Pull secret manifest created${NC}"
-        # Verify it contains localhost:5000
-        if grep -q "localhost:5000" manifests/openshift-config-secret-pull-secret.yaml; then
+        # Verify it contains localhost:5000 (check base64 decoded content)
+        local dockerconfig=$(grep "\.dockerconfigjson:" "$install_dir/manifests/openshift-config-secret-pull-secret.yaml" | awk '{print $2}')
+        if echo "$dockerconfig" | base64 -d | grep -q "localhost:5000"; then
             echo -e "${GREEN}✅ Pull secret contains localhost:5000${NC}"
         else
             echo -e "${RED}❌ Pull secret missing localhost:5000${NC}"
@@ -368,7 +357,7 @@ create_and_validate_manifests() {
     
     # List all manifest files
     echo -e "${BLUE}📋 Generated manifest files:${NC}"
-    ls -la manifests/
+    ls -la "$install_dir/manifests/"
     
     echo -e "${GREEN}✅ Manifest validation completed${NC}"
 }
