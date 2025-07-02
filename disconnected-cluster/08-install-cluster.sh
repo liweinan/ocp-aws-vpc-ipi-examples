@@ -682,19 +682,59 @@ main() {
     # Create installation log
     local log_file=$(create_installation_log "$INSTALL_DIR" "$CLUSTER_NAME")
     
+    # Read actual configuration from install-config.yaml.backup
+    local master_replicas="unknown"
+    local worker_replicas="unknown"
+    local master_instance_type="unknown"
+    local worker_instance_type="unknown"
+    local cluster_mode="Standard"
+    local estimated_cost="\$50-100 per day"
+    
+    if [[ -f "$INSTALL_DIR/install-config.yaml.backup" ]]; then
+        master_replicas=$(yq eval '.controlPlane.replicas' "$INSTALL_DIR/install-config.yaml.backup" 2>/dev/null || echo "unknown")
+        worker_replicas=$(yq eval '.compute[0].replicas' "$INSTALL_DIR/install-config.yaml.backup" 2>/dev/null || echo "unknown")
+        master_instance_type=$(yq eval '.controlPlane.platform.aws.type' "$INSTALL_DIR/install-config.yaml.backup" 2>/dev/null || echo "unknown")
+        worker_instance_type=$(yq eval '.compute[0].platform.aws.type' "$INSTALL_DIR/install-config.yaml.backup" 2>/dev/null || echo "unknown")
+        
+        # Determine if this is SNO mode
+        if [[ "$master_replicas" == "1" && "$worker_replicas" == "0" ]]; then
+            cluster_mode="SNO (Single Node OpenShift)"
+            estimated_cost="\$15-25 per day"
+        elif [[ "$master_replicas" == "3" && "$worker_replicas" == "3" ]]; then
+            cluster_mode="Standard (3 masters + 3 workers)"
+            estimated_cost="\$150-200 per day"
+        else
+            cluster_mode="Custom ($master_replicas masters + $worker_replicas workers)"
+            estimated_cost="\$Variable based on node count"
+        fi
+    fi
+    
     # Confirm installation
     echo "⚠️  This will create an OpenShift cluster with the following resources:"
-    echo "   - Control plane nodes (3x m5.xlarge)"
-    echo "   - Compute nodes (3x m5.xlarge)"
+    echo "   - Control plane nodes (${master_replicas}x $master_instance_type)"
+    echo "   - Compute nodes (${worker_replicas}x $worker_instance_type)"
+    echo "   - Cluster Mode: $cluster_mode"
     echo "   - Associated AWS resources (load balancers, security groups, etc.)"
-    echo "   - Estimated cost: \$50-100 per day"
+    echo "   - Estimated cost: $estimated_cost"
     echo ""
-    read -p "Do you want to proceed with the installation? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Installation cancelled"
-        exit 0
-    fi
+    echo "⚠️  IMPORTANT: This will create real AWS resources and incur costs!"
+    echo ""
+    while true; do
+        read -p "Do you want to proceed with the installation? (yes/no): " -r response
+        case $response in
+            [Yy]es|[Yy])
+                echo "✅ Proceeding with installation..."
+                break
+                ;;
+            [Nn]o|[Nn])
+                echo "❌ Installation cancelled by user"
+                exit 0
+                ;;
+            *)
+                echo "Please answer 'yes' or 'no' (or 'y'/'n')"
+                ;;
+        esac
+    done
     
     # Perform cluster installation
     perform_cluster_installation "$INSTALL_DIR" "$LOG_LEVEL" "$log_file"

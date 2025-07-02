@@ -210,6 +210,15 @@ create_vpc_infrastructure() {
             --map-public-ip-on-launch \
             --region "$region"
         
+        # Add kubernetes.io/cluster/unmanaged tag to public subnet
+        # This prevents OpenShift from managing this subnet during installation
+        aws ec2 create-tags \
+            --resources "$subnet_id" \
+            --tags Key=kubernetes.io/cluster/unmanaged,Value=true \
+            --region "$region"
+        
+        echo "   ✅ Added kubernetes.io/cluster/unmanaged tag to public subnet"
+        
         # Add to subnet list
         if [[ -n "$public_subnet_ids" ]]; then
             public_subnet_ids="${public_subnet_ids},${subnet_id}"

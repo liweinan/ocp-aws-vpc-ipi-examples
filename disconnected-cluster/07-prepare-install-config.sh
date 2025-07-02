@@ -144,6 +144,17 @@ create_install_config() {
     # Create installation directory
     mkdir -p "$install_dir"
     
+    # Get VPC CIDR for machineNetwork
+    local vpc_cidr
+    if [[ -f "infra-output/vpc-cidr" ]]; then
+        vpc_cidr=$(cat infra-output/vpc-cidr)
+        echo -e "${GREEN}✅ Using VPC CIDR from infra-output: $vpc_cidr${NC}"
+    else
+        # Fallback: get VPC CIDR from AWS
+        vpc_cidr=$(aws ec2 describe-vpcs --vpc-ids "$vpc_id" --region "$region" --query 'Vpcs[0].CidrBlock' --output text)
+        echo -e "${GREEN}✅ Retrieved VPC CIDR from AWS: $vpc_cidr${NC}"
+    fi
+    
     # Create install-config.yaml
     cat > "$install_dir/install-config.yaml" <<EOF
 apiVersion: v1
@@ -171,7 +182,7 @@ networking:
   - cidr: 10.128.0.0/14
     hostPrefix: 23
   machineNetwork:
-  - cidr: 10.0.0.0/16
+  - cidr: $vpc_cidr
   networkType: OVNKubernetes
   serviceNetwork:
   - 172.30.0.0/16
