@@ -188,12 +188,13 @@ networking:
 platform:
   aws:
     region: $region
-    subnets:
+    vpc:
+      subnets:
 EOF
     
     # Add private subnet IDs
     for subnet_id in $(echo "$private_subnet_ids" | tr ',' ' '); do
-        echo "    - $subnet_id" >> "$install_dir/install-config.yaml"
+        echo "      - $subnet_id" >> "$install_dir/install-config.yaml"
     done
     
     # Continue with the rest of the config
