@@ -192,7 +192,7 @@ platform:
       subnets:
 EOF
     
-    # Add private subnet IDs
+    # Add private subnet IDs (supports multiple subnets for production)
     for subnet_id in $(echo "$private_subnet_ids" | tr ',' ' '); do
         echo "      - id: $subnet_id" >> "$install_dir/install-config.yaml"
     done
