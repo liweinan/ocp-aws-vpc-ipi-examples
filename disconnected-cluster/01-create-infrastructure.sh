@@ -3,7 +3,7 @@
 # Disconnected Cluster Infrastructure Creation Script
 # Creates VPC, subnets, security groups, and bastion host for disconnected OpenShift cluster
 
-set -euo pipefail
+set -eo pipefail
 
 # Default values
 DEFAULT_CLUSTER_NAME="disconnected-cluster"
@@ -78,6 +78,51 @@ validate_aws_credentials() {
     echo "   User ARN: $user_arn"
 }
 
+# Function to check CIDR conflicts across all VPCs in the region
+check_cidr_conflicts() {
+    local test_cidr="$1"
+    local region="$2"
+    
+    # Check across all VPCs in the region, not just current VPC
+    local conflict_count=$(aws ec2 describe-subnets \
+        --filters "Name=cidr-block,Values=$test_cidr" \
+        --region "$region" \
+        --query 'length(Subnets)' \
+        --output text 2>/dev/null || echo "0")
+    
+    echo "$conflict_count"
+}
+
+# Function to find available CIDR in a range
+find_available_cidr() {
+    local vpc_cidr="$1"
+    local region="$2"
+    local start_base="$3"
+    local subnet_type="$4"  # "public" or "private"
+    
+    local base_ip=$(echo "$vpc_cidr" | cut -d'.' -f1-2)  # e.g., "10.3"
+    local cidr_base=$start_base
+    local max_attempts=100
+    local attempts=0
+    
+    while [ $attempts -lt $max_attempts ]; do
+        local test_cidr="${base_ip}.${cidr_base}.0/24"
+        local conflict_count=$(check_cidr_conflicts "$test_cidr" "$region")
+        
+        if [ "$conflict_count" = "0" ]; then
+            echo "$test_cidr"
+            return 0
+        else
+            echo "   ❌ CIDR $test_cidr conflicts with $conflict_count existing subnet(s)" >&2
+            cidr_base=$((cidr_base + 1))  # Try next /24 block
+            attempts=$((attempts + 1))
+        fi
+    done
+    
+    echo ""  # Return empty if no CIDR found
+    return 1
+}
+
 # Function to create VPC and subnets
 create_vpc_infrastructure() {
     local cluster_name="$1"
@@ -130,26 +175,16 @@ create_vpc_infrastructure() {
     
     for i in $(seq 1 $public_subnets); do
         local az="${az_array[$((i-1))]}"
-        
         # Find available CIDR block for public subnet
-        local subnet_cidr=""
-        local cidr_base=10
-        while [ -z "$subnet_cidr" ]; do
-            local test_cidr=$(echo "$vpc_cidr" | sed "s|/16|/24|" | sed "s|.0/24|.${cidr_base}/24|")
-            
-            # Check if this CIDR conflicts with existing subnets
-            local conflict=$(aws ec2 describe-subnets \
-                --filters "Name=vpc-id,Values=$vpc_id" "Name=cidr-block,Values=$test_cidr" \
-                --region "$region" \
-                --query 'Subnets[0].SubnetId' \
-                --output text 2>/dev/null)
-            
-            if [ "$conflict" = "None" ] || [ -z "$conflict" ]; then
-                subnet_cidr="$test_cidr"
-            else
-                cidr_base=$((cidr_base + 10))
-            fi
-        done
+        echo "   Finding available CIDR for public subnet $i..."
+        local subnet_cidr=$(find_available_cidr "$vpc_cidr" "$region" "$((10 + (i-1) * 10))" "public")
+        
+        if [ -z "$subnet_cidr" ]; then
+            echo "❌ Error: Could not find available CIDR block for public subnet $i"
+            exit 1
+        fi
+        
+        echo "   ✅ Selected CIDR $subnet_cidr for public subnet $i"
         
         echo "   Creating public subnet $i with CIDR $subnet_cidr in AZ $az"
         
@@ -162,14 +197,26 @@ create_vpc_infrastructure() {
             --query 'Subnet.SubnetId' \
             --output text)
         
+        if [[ ! "$subnet_id" =~ ^subnet-[a-zA-Z0-9]+ ]]; then
+            echo "❌ Error: Failed to create public subnet $i: $subnet_id"
+            exit 1
+        fi
+        
+        echo "   ✅ Successfully created public subnet: $subnet_id"
+        
+        # Enable auto-assign public IP for public subnets
         aws ec2 modify-subnet-attribute \
             --subnet-id "$subnet_id" \
             --map-public-ip-on-launch \
             --region "$region"
         
-        public_subnet_ids="${public_subnet_ids}${subnet_id},"
+        # Add to subnet list
+        if [[ -n "$public_subnet_ids" ]]; then
+            public_subnet_ids="${public_subnet_ids},${subnet_id}"
+        else
+            public_subnet_ids="$subnet_id"
+        fi
     done
-    public_subnet_ids=${public_subnet_ids%,}
     
     # Create private subnets
     echo "   Creating private subnets..."
@@ -177,26 +224,16 @@ create_vpc_infrastructure() {
     
     for i in $(seq 1 $private_subnets); do
         local az="${az_array[$((i-1))]}"
-        
         # Find available CIDR block for private subnet
-        local subnet_cidr=""
-        local cidr_base=$((50 + (i-1) * 10))  # Start from different base for each subnet
-        while [ -z "$subnet_cidr" ]; do
-            local test_cidr=$(echo "$vpc_cidr" | sed "s|/16|/24|" | sed "s|.0/24|.${cidr_base}/24|")
-            
-            # Check if this CIDR conflicts with existing subnets
-            local conflict=$(aws ec2 describe-subnets \
-                --filters "Name=vpc-id,Values=$vpc_id" "Name=cidr-block,Values=$test_cidr" \
-                --region "$region" \
-                --query 'Subnets[0].SubnetId' \
-                --output text 2>/dev/null)
-            
-            if [ "$conflict" = "None" ] || [ -z "$conflict" ]; then
-                subnet_cidr="$test_cidr"
-            else
-                cidr_base=$((cidr_base + 10))
-            fi
-        done
+        echo "   Finding available CIDR for private subnet $i..."
+        local subnet_cidr=$(find_available_cidr "$vpc_cidr" "$region" "$((100 + (i-1) * 10))" "private")
+        
+        if [ -z "$subnet_cidr" ]; then
+            echo "❌ Error: Could not find available CIDR block for private subnet $i"
+            exit 1
+        fi
+        
+        echo "   ✅ Selected CIDR $subnet_cidr for private subnet $i"
         
         echo "   Creating private subnet $i with CIDR $subnet_cidr in AZ $az"
         
@@ -209,9 +246,20 @@ create_vpc_infrastructure() {
             --query 'Subnet.SubnetId' \
             --output text)
         
-        private_subnet_ids="${private_subnet_ids}${subnet_id},"
+        if [[ ! "$subnet_id" =~ ^subnet-[a-zA-Z0-9]+ ]]; then
+            echo "❌ Error: Failed to create private subnet $i: $subnet_id"
+            exit 1
+        fi
+        
+        echo "   ✅ Successfully created private subnet: $subnet_id"
+        
+        # Add to subnet list
+        if [[ -n "$private_subnet_ids" ]]; then
+            private_subnet_ids="${private_subnet_ids},${subnet_id}"
+        else
+            private_subnet_ids="$subnet_id"
+        fi
     done
-    private_subnet_ids=${private_subnet_ids%,}
     
     # Note: Disconnected cluster does not need NAT Gateway
     # Private subnets will be completely isolated from internet
@@ -236,12 +284,17 @@ create_vpc_infrastructure() {
         --region "$region"
     
     # Associate public subnets with public route table
-    for subnet_id in $(echo "$public_subnet_ids" | tr ',' ' '); do
-        aws ec2 associate-route-table \
-            --subnet-id "$subnet_id" \
-            --route-table-id "$public_rt_id" \
-            --region "$region"
-    done
+    if [[ -n "$public_subnet_ids" ]]; then
+        for subnet_id in $(echo "$public_subnet_ids" | tr ',' ' '); do
+            if [[ -n "$subnet_id" && "$subnet_id" =~ ^subnet-[a-zA-Z0-9]+ ]]; then
+                echo "   Associating public subnet $subnet_id with public route table"
+                aws ec2 associate-route-table \
+                    --subnet-id "$subnet_id" \
+                    --route-table-id "$public_rt_id" \
+                    --region "$region"
+            fi
+        done
+    fi
     
     # Private route table
     local private_rt_id=$(aws ec2 create-route-table \
@@ -256,12 +309,17 @@ create_vpc_infrastructure() {
     echo "   Private subnets configured with no internet access"
     
     # Associate private subnets with private route table
-    for subnet_id in $(echo "$private_subnet_ids" | tr ',' ' '); do
-        aws ec2 associate-route-table \
-            --subnet-id "$subnet_id" \
-            --route-table-id "$private_rt_id" \
-            --region "$region"
-    done
+    if [[ -n "$private_subnet_ids" ]]; then
+        for subnet_id in $(echo "$private_subnet_ids" | tr ',' ' '); do
+            if [[ -n "$subnet_id" && "$subnet_id" =~ ^subnet-[a-zA-Z0-9]+ ]]; then
+                echo "   Associating private subnet $subnet_id with private route table"
+                aws ec2 associate-route-table \
+                    --subnet-id "$subnet_id" \
+                    --route-table-id "$private_rt_id" \
+                    --region "$region"
+            fi
+        done
+    fi
     
     # Save infrastructure information
     mkdir -p "$output_dir"
@@ -597,30 +655,58 @@ main() {
     while [[ $# -gt 0 ]]; do
         case $1 in
             --cluster-name)
+                if [[ -z "${2:-}" ]]; then
+                    echo "Error: --cluster-name requires a value"
+                    usage
+                fi
                 CLUSTER_NAME="$2"
                 shift 2
                 ;;
             --region)
+                if [[ -z "${2:-}" ]]; then
+                    echo "Error: --region requires a value"
+                    usage
+                fi
                 REGION="$2"
                 shift 2
                 ;;
             --vpc-cidr)
+                if [[ -z "${2:-}" ]]; then
+                    echo "Error: --vpc-cidr requires a value"
+                    usage
+                fi
                 VPC_CIDR="$2"
                 shift 2
                 ;;
             --private-subnets)
+                if [[ -z "${2:-}" ]]; then
+                    echo "Error: --private-subnets requires a value"
+                    usage
+                fi
                 PRIVATE_SUBNETS="$2"
                 shift 2
                 ;;
             --public-subnets)
+                if [[ -z "${2:-}" ]]; then
+                    echo "Error: --public-subnets requires a value"
+                    usage
+                fi
                 PUBLIC_SUBNETS="$2"
                 shift 2
                 ;;
             --instance-type)
+                if [[ -z "${2:-}" ]]; then
+                    echo "Error: --instance-type requires a value"
+                    usage
+                fi
                 INSTANCE_TYPE="$2"
                 shift 2
                 ;;
             --output-dir)
+                if [[ -z "${2:-}" ]]; then
+                    echo "Error: --output-dir requires a value"
+                    usage
+                fi
                 OUTPUT_DIR="$2"
                 shift 2
                 ;;
@@ -705,16 +791,11 @@ main() {
     # Create VPC infrastructure
     create_vpc_infrastructure "$CLUSTER_NAME" "$REGION" "$VPC_CIDR" "$PRIVATE_SUBNETS" "$PUBLIC_SUBNETS" "$OUTPUT_DIR"
     
-    # Create bastion host
-    local vpc_id=$(cat "$OUTPUT_DIR/vpc-id")
-    local public_subnet_ids=$(cat "$OUTPUT_DIR/public-subnet-ids")
-    create_bastion_host "$CLUSTER_NAME" "$REGION" "$vpc_id" "$public_subnet_ids" "$INSTANCE_TYPE" "$OUTPUT_DIR" "$VPC_CIDR"
-    
-    # Create cluster security group
-    create_cluster_security_group "$CLUSTER_NAME" "$REGION" "$vpc_id" "$OUTPUT_DIR" "$SNO_MODE"
+    # Note: Bastion host and cluster security group creation moved to separate script
+    # Run ./01.5-create-bastion.sh to create bastion host and security groups
     
     echo ""
-    echo "✅ Infrastructure creation completed successfully!"
+    echo "✅ VPC infrastructure creation completed successfully!"
     if [[ "$SNO_MODE" == "yes" ]]; then
         echo "🎯 Configured for Single Node OpenShift (SNO) deployment"
     fi
@@ -723,28 +804,27 @@ main() {
     echo "   vpc-id: VPC identifier"
     echo "   public-subnet-ids: Public subnet identifiers"
     echo "   private-subnet-ids: Private subnet identifiers"
-    echo "   bastion-public-ip: Bastion host public IP"
-    echo "   bastion-key.pem: SSH private key for bastion access"
+    echo "   availability-zones: Availability zones used"
+    echo "   region: AWS region"
+    echo "   vpc-cidr: VPC CIDR block"
     echo ""
     echo "🔗 Next steps:"
-    echo "1. Connect to bastion host: ssh -i $OUTPUT_DIR/bastion-key.pem ubuntu@$(cat $OUTPUT_DIR/bastion-public-ip)"
-    echo "2. Run: ./02-setup-mirror-registry.sh --cluster-name $CLUSTER_NAME"
+    echo "1. Create bastion host: ./01.5-create-bastion.sh --cluster-name $CLUSTER_NAME"
     if [[ "$SNO_MODE" == "yes" ]]; then
         echo "   Use --sno flag for SNO-optimized configuration"
     fi
+    echo "2. Setup mirror registry: ./02-setup-mirror-registry.sh --cluster-name $CLUSTER_NAME"
     if [[ "$SNO_MODE" == "yes" ]]; then
         echo ""
         echo "🎯 SNO-specific notes:"
         echo "   - Single private subnet created for SNO node"
-        echo "   - Security group optimized for single node deployment"
         echo "   - Use --sno flag in subsequent scripts for consistency"
         echo "   - Estimated cost: $20-40/day (vs $50-100/day for multi-node)"
     fi
     echo ""
     echo "⚠️  Important:"
-    echo "   - Keep the SSH key file secure: $OUTPUT_DIR/bastion-key.pem"
-    echo "   - The bastion host is accessible from the internet"
     echo "   - Private subnets are completely isolated from internet (disconnected cluster)"
+    echo "   - No NAT Gateway created for cost optimization"
 }
 
 # Run main function with all arguments

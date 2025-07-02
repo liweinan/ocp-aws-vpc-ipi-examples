@@ -81,7 +81,7 @@ setup_registry() {
     # Check if podman is available
     if ! command -v podman >/dev/null 2>&1; then
         echo -e "${BLUE}📦 Installing podman...${NC}"
-        sudo apt-get update
+        sudo apt-get update -y
         sudo apt-get install -y podman
     fi
     
@@ -94,7 +94,7 @@ setup_registry() {
     
     # Install required packages
     echo -e "${BLUE}📦 Installing required packages...${NC}"
-    sudo apt-get update
+    sudo apt-get update -y
     sudo apt-get install -y apache2-utils
     
     # Create authentication

@@ -72,7 +72,7 @@ check_prerequisites() {
     
     if [[ ${#missing_tools[@]} -gt 0 ]]; then
         echo -e "${YELLOW}⚠️  Installing missing tools: ${missing_tools[*]}${NC}"
-        sudo apt-get update
+        sudo apt-get update -y
         sudo apt-get install -y "${missing_tools[@]}"
     fi
     
@@ -269,7 +269,7 @@ verify_sync_results() {
     
     # Check specific images and their tags
     local required_images=(
-        "openshift/release"
+        "openshift/ocp-release"
     )
     
     for image in "${required_images[@]}"; do
@@ -289,7 +289,7 @@ verify_sync_results() {
     
     # Test pulling an image from local registry
     echo "   Testing image pull from local registry..."
-    if podman pull "localhost:${registry_port}/openshift/release:latest" --tls-verify=false 2>/dev/null; then
+    if podman pull "localhost:${registry_port}/openshift/ocp-release:4.19.2-x86_64" --tls-verify=false 2>/dev/null; then
         echo -e "${GREEN}   ✅ Successfully pulled image from local registry${NC}"
     else
         echo -e "${YELLOW}   ⚠️  Could not pull image from local registry${NC}"
