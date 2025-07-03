@@ -117,3 +117,12 @@ pull-secret.json
 *.temp
 temp/
 tmp/
+
+# OpenShift cluster backup directories (contains sensitive info)
+logs/disconnected-cluster-backup-*/
+logs/*-backup-*/
+logs/auth-*/
+logs/*.log
+logs/metadata-*.json
+logs/terraform-*.json
+logs/install-config-*.yaml
