@@ -14,27 +14,44 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 
 整个安装过程分为以下几个步骤：
 
-1. **准备基础设施** - 创建VPC、子网、安全组等
-2. **复制凭证** - 将AWS凭证、SSH密钥和pull secret复制到bastion host
-3. **搭建镜像仓库** - 在bastion host上部署私有镜像仓库
-4. **同步镜像** - 从外部环境同步OpenShift镜像到私有仓库
-5. **配置安装环境** - 准备disconnected cluster的安装配置
-6. **创建和修改Manifests** - 生成并自定义OpenShift manifests以支持断网环境
-7. **安装集群** - 使用私有镜像仓库安装OpenShift集群
-8. **验证和配置** - 验证集群功能并配置后续使用
+1. **创建基础设施** - 创建VPC、子网、安全组等
+2. **创建Bastion主机** - 部署跳板机用于后续操作
+3. **复制凭证** - 将AWS凭证、SSH密钥和pull secret复制到bastion host
+4. **搭建镜像仓库** - 在bastion host上部署私有镜像仓库
+5. **同步镜像** - 从外部环境同步OpenShift镜像到私有仓库
+6. **复制基础设施信息和工具** - 将必要的文件复制到bastion host
+7. **准备安装配置** - 准备disconnected cluster的安装配置
+8. **安装集群** - 使用私有镜像仓库安装OpenShift集群
+9. **验证集群** - 验证集群功能并配置后续使用
+10. **清理资源** - 清理安装过程中产生的临时文件和资源
 
 ## 脚本说明
 
 | 脚本 | 用途 | 说明 |
 |------|------|------|
-| `01-create-infrastructure.sh` | 创建基础设施 | 创建VPC、子网、安全组等基础资源 |
-| `01.5-copy-credentials.sh` | 复制凭证 | 将AWS凭证、SSH密钥和pull secret复制到bastion host |
-| `02-setup-mirror-registry.sh` | 搭建镜像仓库 | 在bastion host上部署私有镜像仓库 |
-| `03-sync-images.sh` | 同步镜像 | 从外部同步OpenShift镜像到私有仓库 |
-| `04-prepare-install-config.sh` | 准备安装配置 | 生成disconnected cluster的安装配置 |
-| `05-install-cluster.sh` | 安装集群 | 创建manifests、修改配置、安装OpenShift集群 |
-| `06-verify-cluster.sh` | 验证集群 | 验证集群功能和镜像仓库配置 |
-| `07-cleanup.sh` | 清理资源 | 清理安装过程中产生的临时文件 |
+| `01-create-infrastructure.sh` | 创建基础设施 | 创建VPC、子网、安全组等基础资源，支持SNO模式 |
+| `02-create-bastion.sh` | 创建Bastion主机 | 部署跳板机，配置必要的工具和环境 |
+| `03-copy-credentials.sh` | 复制凭证 | 将AWS凭证、SSH密钥和pull secret复制到bastion host |
+| `04-setup-mirror-registry.sh` | 搭建镜像仓库 | 在bastion host上部署私有镜像仓库 |
+| `05-sync-images.sh` | 同步镜像 | 从外部同步OpenShift镜像到私有仓库 |
+| `06-copy-infra-and-tools.sh` | 复制基础设施信息 | 将基础设施信息和工具复制到bastion host |
+| `07-prepare-install-config.sh` | 准备安装配置 | 生成disconnected cluster的安装配置 |
+| `08-install-cluster.sh` | 安装集群 | 创建manifests、修改配置、安装OpenShift集群 |
+| `09-verify-cluster.sh` | 验证集群 | 验证集群功能和镜像仓库配置 |
+| `10-cleanup.sh` | 清理资源 | 清理本地文件、bastion文件、AWS资源和集群 |
+| `11-verify-cleanup.sh` | 验证清理 | 验证清理操作是否完成 |
+| `12-cleanup-from-report.sh` | 基于报告清理 | 根据清理报告清理特定资源 |
+| `13-comprehensive-cleanup.sh` | 全面清理 | 执行全面的资源清理 |
+
+## 辅助脚本
+
+| 脚本 | 用途 | 说明 |
+|------|------|------|
+| `simple-sync.sh` | 简单镜像同步 | 简化的镜像同步脚本 |
+| `check-sync-status.sh` | 检查同步状态 | 检查镜像同步状态 |
+| `copy-from-bastion.sh` | 从bastion复制文件 | 从bastion host复制文件到本地 |
+| `force-delete-vpc.sh` | 强制删除VPC | 强制删除VPC和相关资源 |
+| `test-ami.sh` | 测试AMI | 测试AMI可用性 |
 
 ## 前置条件
 
@@ -62,23 +79,32 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 # 1. 创建基础设施
 ./01-create-infrastructure.sh --cluster-name my-disconnected-cluster --region us-east-1
 
-# 2. 复制凭证到bastion host
-./01.5-copy-credentials.sh
+# 2. 创建Bastion主机
+./02-create-bastion.sh --cluster-name my-disconnected-cluster
 
-# 3. 搭建镜像仓库
-./02-setup-mirror-registry.sh --cluster-name my-disconnected-cluster
+# 3. 复制凭证到bastion host
+./03-copy-credentials.sh --cluster-name my-disconnected-cluster
 
-# 4. 同步镜像（需要网络连接）
-./03-sync-images.sh --cluster-name my-disconnected-cluster --openshift-version 4.18.15
+# 4. 搭建镜像仓库
+./04-setup-mirror-registry.sh --cluster-name my-disconnected-cluster
 
-# 5. 准备安装配置
-./04-prepare-install-config.sh --cluster-name my-disconnected-cluster --base-domain example.com
+# 5. 同步镜像（需要网络连接）
+./05-sync-images.sh --cluster-name my-disconnected-cluster --openshift-version 4.18.15
 
-# 6. 安装集群（包含manifest创建和修改）
-./05-install-cluster.sh --cluster-name my-disconnected-cluster
+# 6. 复制基础设施信息和工具
+./06-copy-infra-and-tools.sh --cluster-name my-disconnected-cluster
 
-# 7. 验证集群
-./06-verify-cluster.sh --cluster-name my-disconnected-cluster
+# 7. 准备安装配置
+./07-prepare-install-config.sh --cluster-name my-disconnected-cluster --base-domain example.com
+
+# 8. 安装集群（包含manifest创建和修改）
+./08-install-cluster.sh --cluster-name my-disconnected-cluster
+
+# 9. 验证集群
+./09-verify-cluster.sh --cluster-name my-disconnected-cluster
+
+# 10. 清理资源（可选）
+./10-cleanup.sh --cluster-name my-disconnected-cluster --dry-run
 ```
 
 ## 详细配置
@@ -93,8 +119,8 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 
 ### 网络配置
 
-- **VPC**: 私有VPC，无互联网网关
-- **子网**: 私有子网，通过NAT网关访问镜像仓库
+- **VPC**: 私有VPC，支持单节点(SNO)和多节点部署
+- **子网**: 私有子网和公有子网，通过NAT网关访问
 - **安全组**: 严格的安全组规则
 - **路由**: 自定义路由表
 
@@ -106,11 +132,11 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 
 ### Manifest配置和验证
 
-对于disconnected cluster，`04-prepare-install-config.sh`和`05-install-cluster.sh`脚本会自动创建、验证和修改必要的manifests。
+对于disconnected cluster，`07-prepare-install-config.sh`和`08-install-cluster.sh`脚本会自动创建、验证和修改必要的manifests。
 
-#### 04脚本的Manifest处理
+#### 07脚本的Manifest处理
 
-`04-prepare-install-config.sh`脚本现在包含完整的manifest创建和验证流程：
+`07-prepare-install-config.sh`脚本包含完整的manifest创建和验证流程：
 
 1. **备份install-config.yaml**
    ```bash
@@ -129,9 +155,9 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
    - **openshift-config-secret-pull-secret.yaml**: 验证pull secret配置
    - **网络配置**: 验证subnet和VPC配置
 
-#### 05脚本的Manifest处理
+#### 08脚本的Manifest处理
 
-`05-install-cluster.sh`脚本会进一步修改manifests以支持disconnected环境：
+`08-install-cluster.sh`脚本会进一步修改manifests以支持disconnected环境：
 
 #### 自动创建的Manifests
 
@@ -184,38 +210,26 @@ echo "eyJhdXRocyI6eyJsb2NhbGhvc3Q6NTAwMCI6eyJhdXRoIjoiWVdSdGFXNDZZV1J0YVc0eE1qTT
 grep -A 10 -B 5 'subnet' openshift-install/manifests/cluster-config.yaml
 ```
 
-#### 常见Manifest问题及解决方案
+## 清理选项
 
-1. **imageContentSources已弃用警告**
-   ```
-   level=warning msg=imageContentSources is deprecated, please use ImageDigestSources
-   ```
-   - 这是正常的警告，当前配置仍然有效
-   - 新版本推荐使用ImageDigestSources，但向后兼容
+脚本提供了多种清理级别：
 
-2. **Pull Secret不包含localhost:5000**
-   - 确保04脚本正确生成了包含localhost:5000的pull secret
-   - 检查registry认证信息是否正确
+1. **全面清理** (`--cleanup-level all`)
+   - 清理本地文件
+   - 清理bastion host文件
+   - 清理AWS资源
+   - 清理OpenShift集群
 
-3. **网络配置错误**
-   - 验证subnet ID是否正确
-   - 确认VPC和region配置匹配
+2. **分级清理**
+   - `--cleanup-level local`: 只清理本地文件
+   - `--cleanup-level bastion`: 只清理bastion host文件
+   - `--cleanup-level aws`: 只清理AWS资源
+   - `--cleanup-level cluster`: 只清理OpenShift集群
 
-4. **证书验证失败**
-   - 检查additionalTrustBundle配置
-   - 验证registry证书是否正确
-
-#### 调试模式
-
-脚本默认使用debug日志级别，提供详细的安装过程信息：
-
-```bash
-# 查看详细安装日志
-tail -f logs/install-*.log
-
-# 查看manifest创建日志
-grep "manifest" logs/install-*.log
-```
+3. **验证清理**
+   - `11-verify-cleanup.sh`: 验证清理操作是否完成
+   - `12-cleanup-from-report.sh`: 根据清理报告清理特定资源
+   - `13-comprehensive-cleanup.sh`: 执行全面的资源清理
 
 ## 故障排除
 
@@ -253,11 +267,16 @@ grep "manifest" logs/install-*.log
 - **基础设施日志**: `./logs/infra-*.log`
 - **Manifest日志**: 包含在安装日志中，使用debug级别查看
 
-## 清理
+### 调试模式
+
+脚本默认使用debug日志级别，提供详细的安装过程信息：
 
 ```bash
-# 清理所有资源
-./07-cleanup.sh --cluster-name my-disconnected-cluster --force
+# 查看详细安装日志
+tail -f logs/install-*.log
+
+# 查看manifest创建日志
+grep "manifest" logs/install-*.log
 ```
 
 ## 注意事项
@@ -269,9 +288,18 @@ grep "manifest" logs/install-*.log
 5. **监控**: 监控镜像仓库的性能和可用性
 6. **Manifests**: 确保disconnected cluster的manifests正确配置，特别是镜像内容源和网络策略
 7. **调试**: 使用debug日志级别进行故障排除，提供更详细的安装信息
+8. **清理**: 使用适当的清理级别避免意外删除重要资源
 
 ## 相关文档
 
 - [OpenShift Disconnected Installation](https://docs.openshift.com/container-platform/latest/installing/installing_aws/installing-aws-restricted-networks.html)
 - [Mirror Registry for Red Hat OpenShift](https://docs.openshift.com/container-platform/latest/installing/installing_aws/installing-aws-restricted-networks.html#installation-mirror-repository_installing-aws-restricted-networks)
-- [AWS VPC Documentation](https://docs.aws.amazon.com/vpc/) 
+- [AWS VPC Documentation](https://docs.aws.amazon.com/vpc/)
+
+## 附加文档
+
+- `README-improvements.md`: 改进建议和最佳实践
+- `README-certificate-improvements.md`: 证书配置改进
+- `README-disconnected-architecture.md`: 断网架构说明
+- `README-mirror-improvements.md`: 镜像仓库改进
+- `AWS-VPC-Network-Structure.md`: AWS VPC网络结构说明 
