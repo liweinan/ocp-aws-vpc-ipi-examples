@@ -1,8 +1,7 @@
 #!/bin/bash
 
-# Single Image Synchronization Script
-# This script handles pull+push of a single image from CI registry to local registry
-# Simplified to match manual operation logic
+# Single Image Sync Script for OpenShift Disconnected Cluster
+# This script syncs a single image from CI registry to local mirror registry
 
 set -euo pipefail
 
@@ -13,63 +12,121 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Function to display usage
-usage() {
-    echo "Usage: $0 <image-name> <openshift-version> <registry-port> <registry-user> <registry-password>"
-    echo "Example: $0 cli 4.19.2 5000 admin admin123"
-    exit 1
-}
-
-# Check arguments
-if [[ $# -ne 5 ]]; then
-    usage
-fi
-
+# Parameters
 IMAGE_NAME="$1"
-OPENSHIFT_VERSION="$2"
+IMAGE_TAG="$2"
 REGISTRY_PORT="$3"
 REGISTRY_USER="$4"
 REGISTRY_PASSWORD="$5"
 
 # Configuration
 CI_REGISTRY="registry.ci.openshift.org"
-REGISTRY_URL="localhost:${REGISTRY_PORT}"
-SOURCE_IMAGE="${CI_REGISTRY}/ocp/${OPENSHIFT_VERSION}:${IMAGE_NAME}"
-LOCAL_IMAGE="${REGISTRY_URL}/openshift/${IMAGE_NAME}:${OPENSHIFT_VERSION}"
-LOCAL_IMAGE_LATEST="${REGISTRY_URL}/openshift/${IMAGE_NAME}:latest"
+LOCAL_REGISTRY="localhost:${REGISTRY_PORT}"
+OPENSHIFT_VERSION="4.19.2"
 
-echo -e "${BLUE}🔄 Syncing image: ${IMAGE_NAME}${NC}"
-echo "   Source: ${SOURCE_IMAGE}"
-echo "   Target: ${LOCAL_IMAGE}"
+# Function to sync image using skopeo
+sync_image_with_skopeo() {
+    local src_image="$1"
+    local dst_image="$2"
+    
+    echo -e "${BLUE}   📥 Syncing with skopeo: ${src_image} -> ${dst_image}${NC}"
+    
+    # Create auth file for local registry
+    local auth_file="/tmp/auth-${RANDOM}.json"
+    echo "{\"auths\":{\"${LOCAL_REGISTRY}\":{\"auth\":\"$(echo -n ${REGISTRY_USER}:${REGISTRY_PASSWORD} | base64)\"}}}" > "$auth_file"
+    
+    # Use skopeo to copy the image
+    if sudo -E skopeo copy \
+        --tls-verify=false \
+        --dest-tls-verify=false \
+        --dest-authfile "$auth_file" \
+        "docker://${src_image}" \
+        "docker://${dst_image}"; then
+        rm -f "$auth_file"
+        return 0
+    else
+        rm -f "$auth_file"
+        return 1
+    fi
+}
 
-# Check if image already exists in local registry
-if curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/openshift/${IMAGE_NAME}/tags/list" 2>/dev/null | grep -q "${OPENSHIFT_VERSION}"; then
-    echo -e "${YELLOW}   ⏭️  Already exists, skipping${NC}"
-    exit 0
+# Function to sync image using podman
+sync_image_with_podman() {
+    local src_image="$1"
+    local dst_image="$2"
+    
+    echo -e "${BLUE}   📥 Syncing with podman: ${src_image} -> ${dst_image}${NC}"
+    
+    # Pull image from source
+    if sudo -E podman pull "${src_image}"; then
+        # Tag image for local registry
+        if sudo -E podman tag "${src_image}" "${dst_image}"; then
+            # Push to local registry
+            if sudo -E podman push "${dst_image}" --tls-verify=false; then
+                # Clean up local image
+                sudo -E podman rmi "${src_image}" "${dst_image}" &> /dev/null || true
+                return 0
+            fi
+        fi
+    fi
+    
+    # Clean up on failure
+    sudo -E podman rmi "${src_image}" "${dst_image}" &> /dev/null || true
+    return 1
+}
+
+# Main sync function
+sync_image() {
+    local image_name="$1"
+    local image_tag="$2"
+    
+    # Determine source image path
+    local src_image
+    if [[ "$image_name" == */* ]]; then
+        # Image name contains path (e.g., origin/release)
+        src_image="${CI_REGISTRY}/${image_name}:${image_tag}"
+    else
+        # Standard OpenShift image
+        src_image="${CI_REGISTRY}/openshift/${image_name}:${image_tag}"
+    fi
+    
+    # Determine destination image path
+    local dst_image="${LOCAL_REGISTRY}/openshift/${image_name}:${image_tag}"
+    
+    echo -e "${BLUE}🔄 Syncing image: ${image_name}:${image_tag}${NC}"
+    echo "   Source: ${src_image}"
+    echo "   Destination: ${dst_image}"
+    
+    # Try skopeo first, then podman as fallback
+    if command -v skopeo &> /dev/null; then
+        if sync_image_with_skopeo "$src_image" "$dst_image"; then
+            echo -e "${GREEN}   ✅ Successfully synced with skopeo${NC}"
+            return 0
+        else
+            echo -e "${YELLOW}   ⚠️  Skopeo sync failed, trying podman...${NC}"
+        fi
+    fi
+    
+    if sync_image_with_podman "$src_image" "$dst_image"; then
+        echo -e "${GREEN}   ✅ Successfully synced with podman${NC}"
+        return 0
+    else
+        echo -e "${RED}   ❌ Failed to sync with both skopeo and podman${NC}"
+        return 1
+    fi
+}
+
+# Validate parameters
+if [[ $# -ne 5 ]]; then
+    echo -e "${RED}❌ Usage: $0 <image_name> <image_tag> <registry_port> <registry_user> <registry_password>${NC}"
+    exit 1
 fi
 
-# Simple registry login (like manual operation)
-echo "   🔐 Logging into registries..."
-CI_TOKEN=$(oc whoami -t)
-sudo -E podman login -u="weli" -p="${CI_TOKEN}" "${CI_REGISTRY}"
-sudo -E podman login --username "${REGISTRY_USER}" --password "${REGISTRY_PASSWORD}" --tls-verify=false "localhost:${REGISTRY_PORT}"
+# Check if required tools are available
+if ! command -v skopeo &> /dev/null && ! command -v podman &> /dev/null; then
+    echo -e "${RED}❌ Neither skopeo nor podman is available${NC}"
+    exit 1
+fi
 
-# Pull image (exactly like manual operation)
-echo "   📥 Pulling image..."
-sudo -E podman pull "$SOURCE_IMAGE" --platform linux/amd64
-
-# Tag for local registry
-echo "   🏷️  Tagging images..."
-sudo -E podman tag "$SOURCE_IMAGE" "$LOCAL_IMAGE"
-sudo -E podman tag "$SOURCE_IMAGE" "$LOCAL_IMAGE_LATEST"
-
-# Push to local registry (exactly like manual operation)
-echo "   📤 Pushing images..."
-sudo -E podman push "$LOCAL_IMAGE" --tls-verify=false
-sudo -E podman push "$LOCAL_IMAGE_LATEST" --tls-verify=false
-
-# Clean up local copy to save space
-echo "   🧹 Cleaning up local images..."
-sudo -E podman rmi "$SOURCE_IMAGE" "$LOCAL_IMAGE" "$LOCAL_IMAGE_LATEST" 2>/dev/null || true
-
-echo -e "${GREEN}   ✅ Successfully synced ${IMAGE_NAME}${NC}" 
+# Perform the sync
+sync_image "$IMAGE_NAME" "$IMAGE_TAG" 

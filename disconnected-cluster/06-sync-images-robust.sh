@@ -59,6 +59,13 @@ core_images=(
     "coredns"
 )
 
+# Define release images (critical for bootstrap)
+release_images=(
+    "origin/release:4.19"
+    "ocp/release:4.19.2"
+    "openshift/release:4.19.2"
+)
+
 # Define additional important images
 additional_images=(
     "cluster-network-operator"
@@ -73,12 +80,63 @@ additional_images=(
     "kube-state-metrics"
 )
 
-total_images=$((${#core_images[@]} + ${#additional_images[@]}))
+total_images=$((${#core_images[@]} + ${#release_images[@]} + ${#additional_images[@]}))
 synced_count=0
 failed_count=0
 skipped_count=0
 current_count=0
 
+echo -e "${BLUE}📦 Syncing release images (${#release_images[@]} images)...${NC}"
+
+# Sync release images first (most critical)
+for img in "${release_images[@]}"; do
+    current_count=$((current_count + 1))
+    echo ""
+    echo -e "${BLUE}[${current_count}/${total_images}] Processing release image: ${img}${NC}"
+    
+    # Handle special case for origin/release images
+    if [[ "$img" == origin/release:* ]]; then
+        # For origin/release, we need to sync from registry.ci.openshift.org
+        local src_image="registry.ci.openshift.org/${img}"
+        local dst_image="localhost:${REGISTRY_PORT}/openshift/${img}"
+        
+        echo -e "${BLUE}   Syncing: ${src_image} -> ${dst_image}${NC}"
+        
+        # Use skopeo to sync the image
+        if sudo -E skopeo copy --tls-verify=false --dest-tls-verify=false \
+            --dest-authfile <(echo "{\"auths\":{\"localhost:${REGISTRY_PORT}\":{\"auth\":\"$(echo -n ${REGISTRY_USER}:${REGISTRY_PASSWORD} | base64)\"}}}" | jq .) \
+            "docker://${src_image}" "docker://${dst_image}"; then
+            echo -e "${GREEN}   ✅ Successfully synced ${img}${NC}"
+            synced_count=$((synced_count + 1))
+        else
+            echo -e "${RED}   ❌ Failed to sync ${img}${NC}"
+            failed_count=$((failed_count + 1))
+        fi
+    else
+        # For other release images, use standard sync method
+        local img_name=$(echo "$img" | cut -d':' -f1)
+        local img_tag=$(echo "$img" | cut -d':' -f2)
+        
+        # Check if image already exists
+        if curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/openshift/${img_name}/tags/list" 2>/dev/null | grep -q "${img_tag}"; then
+            echo -e "${YELLOW}   ⏭️  Already exists in registry, skipping${NC}"
+            skipped_count=$((skipped_count + 1))
+        else
+            # Call single sync script
+            if sudo -E "$SINGLE_SYNC_SCRIPT" "$img_name" "$img_tag" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"; then
+                synced_count=$((synced_count + 1))
+            else
+                echo -e "${RED}   ❌ Failed to sync ${img}${NC}"
+                failed_count=$((failed_count + 1))
+            fi
+        fi
+    fi
+    
+    # Brief pause between images
+    sleep 2
+done
+
+echo ""
 echo -e "${BLUE}📦 Syncing core images (${#core_images[@]} images)...${NC}"
 
 for img in "${core_images[@]}"; do
@@ -145,6 +203,7 @@ registry_catalog=$(curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https:
 missing_images=()
 verified_count=0
 
+# Verify regular images
 for img in "${all_expected_images[@]}"; do
     expected_repo="openshift/${img}"
     if echo "$registry_catalog" | jq -r '.repositories[]' | grep -q "^${expected_repo}$"; then
@@ -153,6 +212,22 @@ for img in "${all_expected_images[@]}"; do
             verified_count=$((verified_count + 1))
         else
             missing_images+=("${img} (version ${OPENSHIFT_VERSION} missing)")
+        fi
+    else
+        missing_images+=("${img} (repository missing)")
+    fi
+done
+
+# Verify release images
+for img in "${release_images[@]}"; do
+    expected_repo="openshift/${img%%:*}"
+    expected_tag="${img##*:}"
+    if echo "$registry_catalog" | jq -r '.repositories[]' | grep -q "^${expected_repo}$"; then
+        # Double check the specific version tag exists
+        if curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/${expected_repo}/tags/list" 2>/dev/null | grep -q "${expected_tag}"; then
+            verified_count=$((verified_count + 1))
+        else
+            missing_images+=("${img} (version ${expected_tag} missing)")
         fi
     else
         missing_images+=("${img} (repository missing)")
@@ -189,6 +264,9 @@ Results:
 - Verified in registry: ${verified_count} images
 - Total processed: ${current_count}/${total_images} images
 
+Release Images (${#release_images[@]}):
+$(printf "  - %s\n" "${release_images[@]}")
+
 Core Images (${#core_images[@]}):
 $(printf "  - %s\n" "${core_images[@]}")
 
@@ -213,6 +291,9 @@ spec:
   - mirrors:
     - localhost:${REGISTRY_PORT}/openshift
     source: registry.ci.openshift.org/openshift
+  - mirrors:
+    - localhost:${REGISTRY_PORT}/openshift
+    source: registry.ci.openshift.org/origin
   - mirrors:
     - localhost:${REGISTRY_PORT}/openshift
     source: quay.io/openshift-release-dev/ocp-release

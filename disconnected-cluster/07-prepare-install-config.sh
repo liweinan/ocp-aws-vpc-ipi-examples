@@ -214,7 +214,13 @@ imageContentSources:
   source: registry.ci.openshift.org/ocp/4.19.2
 - mirrors:
   - localhost:$registry_port/openshift
+  source: registry.ci.openshift.org/ocp/4.19
+- mirrors:
+  - localhost:$registry_port/openshift
   source: registry.ci.openshift.org/openshift
+- mirrors:
+  - localhost:$registry_port/openshift
+  source: registry.ci.openshift.org/origin
 - mirrors:
   - localhost:$registry_port/openshift
   source: quay.io/openshift-release-dev/ocp-release
@@ -237,7 +243,7 @@ check_registry_status() {
         echo -e "${GREEN}✅ Registry container is running${NC}"
     else
         echo -e "${YELLOW}⚠️  Registry container is not running${NC}"
-        echo "   Run: ./02-setup-mirror-registry.sh to start the registry"
+        echo "   Run: ./05-setup-mirror-registry.sh to start the registry"
         return 1
     fi
     
@@ -248,6 +254,35 @@ check_registry_status() {
         echo -e "${YELLOW}⚠️  Registry is not accessible on localhost:${registry_port}${NC}"
         echo "   Check if the registry is properly configured and running"
         return 1
+    fi
+    
+    # Check for critical bootstrap images
+    echo -e "${BLUE}🔍 Checking critical bootstrap images...${NC}"
+    local missing_critical_images=()
+    
+    # Check for origin/release image (critical for bootstrap)
+    if ! curl -k -s -u admin:admin123 "https://localhost:${registry_port}/v2/openshift/origin/release/tags/list" 2>/dev/null | grep -q "4.19"; then
+        missing_critical_images+=("origin/release:4.19")
+    fi
+    
+    # Check for installer image
+    if ! curl -k -s -u admin:admin123 "https://localhost:${registry_port}/v2/openshift/installer/tags/list" 2>/dev/null | grep -q "4.19"; then
+        missing_critical_images+=("installer:4.19")
+    fi
+    
+    # Check for CLI image
+    if ! curl -k -s -u admin:admin123 "https://localhost:${registry_port}/v2/openshift/cli/tags/list" 2>/dev/null | grep -q "4.19"; then
+        missing_critical_images+=("cli:4.19")
+    fi
+    
+    if [[ ${#missing_critical_images[@]} -gt 0 ]]; then
+        echo -e "${YELLOW}⚠️  Missing critical bootstrap images:${NC}"
+        printf '   - %s\n' "${missing_critical_images[@]}"
+        echo ""
+        echo -e "${YELLOW}🔧 Run ./06-sync-images-robust.sh to sync missing images${NC}"
+        return 1
+    else
+        echo -e "${GREEN}✅ All critical bootstrap images are present${NC}"
     fi
 }
 
@@ -366,6 +401,23 @@ validate_install_config() {
             echo -e "${GREEN}✅ Registry is accessible${NC}"
         else
             echo -e "${YELLOW}⚠️  Registry may not be accessible - check if it's running${NC}"
+        fi
+        
+        # Verify imageContentSources configuration
+        echo -e "${BLUE}🔍 Verifying imageContentSources configuration...${NC}"
+        if grep -q "registry.ci.openshift.org/origin" "$install_dir/install-config.yaml"; then
+            echo -e "${GREEN}✅ origin source mapping found${NC}"
+        else
+            echo -e "${RED}❌ Missing origin source mapping - this will cause bootstrap failures${NC}"
+            echo "   Bootstrap nodes need registry.ci.openshift.org/origin -> localhost:5000/openshift mapping"
+            exit 1
+        fi
+        
+        if grep -q "registry.ci.openshift.org/ocp/4.19" "$install_dir/install-config.yaml"; then
+            echo -e "${GREEN}✅ ocp/4.19 source mapping found${NC}"
+        else
+            echo -e "${RED}❌ Missing ocp/4.19 source mapping${NC}"
+            exit 1
         fi
     else
         echo -e "${RED}❌ install-config.yaml not found${NC}"
