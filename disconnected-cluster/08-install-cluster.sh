@@ -335,7 +335,7 @@ create_installation_log() {
     
     local log_file="$install_dir/install-$(date +%Y%m%d-%H%M%S).log"
     
-    echo "📝 Installation log will be saved to: $log_file"
+    echo "Installation log will be saved to: $log_file"
     echo "$log_file"
 }
 
@@ -355,24 +355,9 @@ perform_cluster_installation() {
     # Start installation with logging (non-interactive)
     echo "🔄 Running: ./openshift-install create cluster --log-level=$log_level"
     echo ""
-    echo "📋 Expected interactive prompts (will be auto-answered with 'yes'):"
-    echo "   - 'Do you wish to continue?' → yes"
-    echo "   - 'Continue?' → yes"
-    echo "   - 'Proceed?' → yes"
-    echo "   - 'Install?' → yes"
-    echo "   - 'Create?' → yes"
-    echo "   - 'Confirm?' → yes"
-    echo "   - 'Y/N' → Y"
-    echo "   - 'y/n' → y"
-    echo "   - 'yes/no' → yes"
-    echo "   - 'YES/NO' → YES"
+    echo "📋 OpenShift installer will automatically proceed through any interactive prompts."
     echo ""
-    echo "💰 Estimated costs:"
-    echo "   - Compute nodes (3x m5.xlarge): ~\$50-100 per day"
-    echo "   - Associated AWS resources (load balancers, security groups, etc.)"
-    echo "   - Total estimated cost: \$50-100 per day"
-    echo ""
-    echo "⏳ Starting installation (auto-answering all prompts with 'yes')..."
+    echo "⏳ Starting installation process..."
     echo ""
     
     # Set environment variables to avoid interactive prompts
@@ -710,28 +695,41 @@ main() {
     fi
     
     # Confirm installation
-    echo "⚠️  This will create an OpenShift cluster with the following resources:"
-    echo "   - Control plane nodes (${master_replicas}x $master_instance_type)"
-    echo "   - Compute nodes (${worker_replicas}x $worker_instance_type)"
-    echo "   - Cluster Mode: $cluster_mode"
-    echo "   - Associated AWS resources (load balancers, security groups, etc.)"
-    echo "   - Estimated cost: $estimated_cost"
     echo ""
-    echo "⚠️  IMPORTANT: This will create real AWS resources and incur costs!"
+    echo "==========================================="
+    echo "   OPENSHIFT CLUSTER INSTALLATION REVIEW"
+    echo "==========================================="
+    echo ""
+    echo "📋 Cluster Configuration:"
+    echo "   • Cluster Name: $CLUSTER_NAME"
+    echo "   • Control plane nodes: ${master_replicas}x $master_instance_type"
+    echo "   • Compute nodes: ${worker_replicas}x $worker_instance_type"
+    echo "   • Cluster Mode: $cluster_mode"
+    echo ""
+    echo "💰 Cost Estimation:"
+    echo "   • Estimated daily cost: $estimated_cost"
+    echo "   • AWS resources: Load balancers, security groups, storage, etc."
+    echo ""
+    echo "⚠️  IMPORTANT NOTICE:"
+    echo "   • This will create real AWS resources and incur costs"
+    echo "   • Installation takes approximately 30-45 minutes"
+    echo "   • All resources will be created in your AWS account"
     echo ""
     while true; do
-        read -p "Do you want to proceed with the installation? (yes/no): " -r response
+        read -p "Do you want to continue with the cluster installation? (yes/no): " -r response
         case $response in
             [Yy]es|[Yy])
-                echo "✅ Proceeding with installation..."
+                echo ""
+                echo "✅ Installation confirmed. Starting cluster deployment..."
                 break
                 ;;
             [Nn]o|[Nn])
+                echo ""
                 echo "❌ Installation cancelled by user"
                 exit 0
                 ;;
             *)
-                echo "Please answer 'yes' or 'no' (or 'y'/'n')"
+                echo "   Please answer 'yes' or 'no' (or 'y'/'n')"
                 ;;
         esac
     done
