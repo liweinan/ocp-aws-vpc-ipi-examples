@@ -239,7 +239,7 @@ check_registry_status() {
     echo -e "${BLUE}🔍 Checking registry status...${NC}"
     
     # Check if registry container is running
-    if sudo -E podman ps --format "table {{.Names}}" | grep -q "registry"; then
+    if sudo -E podman ps --format "table {{.Names}}" | grep -q "mirror-registry"; then
         echo -e "${GREEN}✅ Registry container is running${NC}"
     else
         echo -e "${YELLOW}⚠️  Registry container is not running${NC}"
