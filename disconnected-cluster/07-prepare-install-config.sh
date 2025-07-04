@@ -260,9 +260,9 @@ check_registry_status() {
     echo -e "${BLUE}🔍 Checking critical bootstrap images...${NC}"
     local missing_critical_images=()
     
-    # Check for origin/release image (critical for bootstrap)
-    if ! curl -k -s -u admin:admin123 "https://localhost:${registry_port}/v2/openshift/origin/release/tags/list" 2>/dev/null | grep -q "4.19"; then
-        missing_critical_images+=("origin/release:4.19")
+    # Check for ocp/release image (critical for bootstrap)
+    if ! curl -k -s -u admin:admin123 "https://localhost:${registry_port}/v2/openshift/ocp/release/tags/list" 2>/dev/null | grep -q "4.19"; then
+        missing_critical_images+=("ocp/release:4.19")
     fi
     
     # Check for installer image
