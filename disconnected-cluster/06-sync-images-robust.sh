@@ -279,7 +279,7 @@ metadata:
 spec:
   repositoryDigestMirrors:
   - mirrors:
-    - localhost:${REGISTRY_PORT}/openshift/ocp/release
+    - localhost:${REGISTRY_PORT}/openshift
     source: registry.ci.openshift.org/ocp/${OPENSHIFT_VERSION}
   - mirrors:
     - localhost:${REGISTRY_PORT}/openshift
@@ -288,7 +288,7 @@ spec:
     - localhost:${REGISTRY_PORT}/openshift
     source: registry.ci.openshift.org/origin
   - mirrors:
-    - localhost:${REGISTRY_PORT}/openshift/ocp/release
+    - localhost:${REGISTRY_PORT}/openshift
     source: quay.io/openshift-release-dev/ocp-release
   - mirrors:
     - localhost:${REGISTRY_PORT}/openshift

@@ -210,10 +210,10 @@ additionalTrustBundle: |
 $(echo "$registry_cert" | sed 's/^/  /')
 imageContentSources:
 - mirrors:
-  - localhost:$registry_port/openshift/ocp/release
+  - localhost:$registry_port/openshift
   source: registry.ci.openshift.org/ocp/4.19.2
 - mirrors:
-  - localhost:$registry_port/openshift/ocp/release
+  - localhost:$registry_port/openshift
   source: registry.ci.openshift.org/ocp/4.19
 - mirrors:
   - localhost:$registry_port/openshift
@@ -222,7 +222,7 @@ imageContentSources:
   - localhost:$registry_port/openshift
   source: registry.ci.openshift.org/origin
 - mirrors:
-  - localhost:$registry_port/openshift/ocp/release
+  - localhost:$registry_port/openshift
   source: quay.io/openshift-release-dev/ocp-release
 - mirrors:
   - localhost:$registry_port/openshift
@@ -239,7 +239,7 @@ check_registry_status() {
     echo -e "${BLUE}🔍 Checking registry status...${NC}"
     
     # Check if registry container is running
-    if sudo -E podman ps --format "table {{.Names}}" | grep -q "mirror-registry"; then
+    if sudo -E podman ps --format "table {{.Names}}" | grep -q "registry"; then
         echo -e "${GREEN}✅ Registry container is running${NC}"
     else
         echo -e "${YELLOW}⚠️  Registry container is not running${NC}"
@@ -260,9 +260,9 @@ check_registry_status() {
     echo -e "${BLUE}🔍 Checking critical bootstrap images...${NC}"
     local missing_critical_images=()
     
-    # Check for ocp/release image (critical for bootstrap)
-    if ! curl -k -s -u admin:admin123 "https://localhost:${registry_port}/v2/openshift/ocp/release/tags/list" 2>/dev/null | grep -q "4.19"; then
-        missing_critical_images+=("ocp/release:4.19")
+    # Check for origin/release image (critical for bootstrap)
+    if ! curl -k -s -u admin:admin123 "https://localhost:${registry_port}/v2/openshift/origin/release/tags/list" 2>/dev/null | grep -q "4.19"; then
+        missing_critical_images+=("origin/release:4.19")
     fi
     
     # Check for installer image
