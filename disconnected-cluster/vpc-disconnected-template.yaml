@@ -32,6 +32,9 @@ Parameters:
     AllowedValues: ['yes', 'no']
     Description: 'Enable Single Node OpenShift (SNO) mode'
 
+Conditions:
+  IsSNOMode: !Equals [!Ref SNOMode, 'yes']
+
 Resources:
   # VPC
   VPC:
@@ -201,12 +204,12 @@ Resources:
             Action: '*'
             Resource: '*'
 
-  # Route53 Interface Endpoint
-  Route53Endpoint:
+  # EFS Interface Endpoint (Required for OpenShift persistent storage)
+  EFSEndpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
       VpcId: !Ref VPC
-      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.route53'
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.elasticfilesystem'
       VpcEndpointType: Interface
       SubnetIds:
         - !Ref PrivateSubnet
@@ -241,25 +244,7 @@ Resources:
             Action: '*'
             Resource: '*'
 
-  # EBS Interface Endpoint
-  EBSEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcId: !Ref VPC
-      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ebs'
-      VpcEndpointType: Interface
-      SubnetIds:
-        - !Ref PrivateSubnet
-      SecurityGroupIds:
-        - !Ref VPCEndpointsSecurityGroup
-      PrivateDnsEnabled: true
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal: '*'
-            Action: '*'
-            Resource: '*'
+
 
   # Bastion Security Group
   BastionSecurityGroup:
@@ -297,12 +282,12 @@ Resources:
   ClusterSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub '${ClusterName}-${SNOMode == "yes" ? "sno" : "cluster"}-sg'
-      GroupDescription: !Sub 'Security group for OpenShift ${SNOMode == "yes" ? "SNO" : "multi-node"} cluster'
+      GroupName: !If [IsSNOMode, !Sub '${ClusterName}-sno-sg', !Sub '${ClusterName}-cluster-sg']
+      GroupDescription: !If [IsSNOMode, 'Security group for OpenShift SNO cluster', 'Security group for OpenShift multi-node cluster']
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub '${ClusterName}-${SNOMode == "yes" ? "sno" : "cluster"}-sg'
+          Value: !If [IsSNOMode, !Sub '${ClusterName}-sno-sg', !Sub '${ClusterName}-cluster-sg']
 
   # Allow all traffic within cluster security group
   ClusterSecurityGroupIngress:
@@ -402,23 +387,17 @@ Outputs:
     Export:
       Name: !Sub '${ClusterName}-ELBEndpoint-ID'
 
-  Route53EndpointId:
-    Description: 'Route53 Interface endpoint ID'
-    Value: !Ref Route53Endpoint
+  EFSEndpointId:
+    Description: 'EFS Interface endpoint ID'
+    Value: !Ref EFSEndpoint
     Export:
-      Name: !Sub '${ClusterName}-Route53Endpoint-ID'
+      Name: !Sub '${ClusterName}-EFSEndpoint-ID'
 
   STSEndpointId:
     Description: 'STS Interface endpoint ID'
     Value: !Ref STSEndpoint
     Export:
       Name: !Sub '${ClusterName}-STSEndpoint-ID'
-
-  EBSEndpointId:
-    Description: 'EBS Interface endpoint ID'
-    Value: !Ref EBSEndpoint
-    Export:
-      Name: !Sub '${ClusterName}-EBSEndpoint-ID'
 
   NATGatewayId:
     Description: 'NAT Gateway ID (none for disconnected cluster)'

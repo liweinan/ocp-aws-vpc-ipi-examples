@@ -223,14 +223,14 @@ find_non_conflicting_cidrs() {
         return
     fi
     
-    print_info "🔍 Checking for CIDR conflicts in region $region..."
+    print_info "🔍 Checking for CIDR conflicts in region $region..." >&2
     
     # Get existing CIDRs
     local existing_vpc_cidrs=$(get_existing_vpc_cidrs "$region")
     local existing_subnet_cidrs=$(get_existing_subnet_cidrs "$region")
     
-    print_info "Found $(echo "$existing_vpc_cidrs" | wc -w) existing VPCs"
-    print_info "Found $(echo "$existing_subnet_cidrs" | wc -w) existing subnets"
+    print_info "Found $(echo "$existing_vpc_cidrs" | wc -w) existing VPCs" >&2
+    print_info "Found $(echo "$existing_subnet_cidrs" | wc -w) existing subnets" >&2
     
     local final_vpc_cidr="$vpc_cidr"
     local final_private_cidr="$private_subnet_cidr"
@@ -240,7 +240,7 @@ find_non_conflicting_cidrs() {
     # Check VPC CIDR conflicts
     for existing_cidr in $existing_vpc_cidrs; do
         if cidr_overlap "$final_vpc_cidr" "$existing_cidr"; then
-            print_warning "VPC CIDR conflict detected: $final_vpc_cidr overlaps with $existing_cidr"
+            print_warning "VPC CIDR conflict detected: $final_vpc_cidr overlaps with $existing_cidr" >&2
             conflicts_found=true
             
             # Try to find alternative
@@ -257,7 +257,7 @@ find_non_conflicting_cidrs() {
                 done
                 
                 if [[ "$has_conflict" == false ]]; then
-                    print_success "Found alternative VPC CIDR: $alternative_vpc_cidr"
+                    print_success "Found alternative VPC CIDR: $alternative_vpc_cidr" >&2
                     final_vpc_cidr="$alternative_vpc_cidr"
                     
                     # Adjust subnet CIDRs to fit within new VPC CIDR
@@ -271,7 +271,7 @@ find_non_conflicting_cidrs() {
             done
             
             if [[ $attempts -eq 10 ]]; then
-                print_error "Could not find non-conflicting VPC CIDR after 10 attempts"
+                print_error "Could not find non-conflicting VPC CIDR after 10 attempts" >&2
                 return 1
             fi
             break
@@ -281,28 +281,28 @@ find_non_conflicting_cidrs() {
     # Check subnet CIDR conflicts
     for existing_cidr in $existing_subnet_cidrs; do
         if cidr_overlap "$final_private_cidr" "$existing_cidr"; then
-            print_warning "Private subnet CIDR conflict detected: $final_private_cidr overlaps with $existing_cidr"
+            print_warning "Private subnet CIDR conflict detected: $final_private_cidr overlaps with $existing_cidr" >&2
             conflicts_found=true
             final_private_cidr=$(generate_alternative_cidr "$final_private_cidr" "private")
-            print_success "Using alternative private subnet CIDR: $final_private_cidr"
+            print_success "Using alternative private subnet CIDR: $final_private_cidr" >&2
         fi
         
         if cidr_overlap "$final_public_cidr" "$existing_cidr"; then
-            print_warning "Public subnet CIDR conflict detected: $final_public_cidr overlaps with $existing_cidr"
+            print_warning "Public subnet CIDR conflict detected: $final_public_cidr overlaps with $existing_cidr" >&2
             conflicts_found=true
             final_public_cidr=$(generate_alternative_cidr "$final_public_cidr" "public")
-            print_success "Using alternative public subnet CIDR: $final_public_cidr"
+            print_success "Using alternative public subnet CIDR: $final_public_cidr" >&2
         fi
     done
     
     if [[ "$conflicts_found" == true ]]; then
-        print_success "✅ All CIDR conflicts resolved automatically"
-        print_info "Final CIDRs:"
-        print_info "  VPC CIDR: $final_vpc_cidr"
-        print_info "  Private Subnet CIDR: $final_private_cidr"
-        print_info "  Public Subnet CIDR: $final_public_cidr"
+        print_success "✅ All CIDR conflicts resolved automatically" >&2
+        print_info "Final CIDRs:" >&2
+        print_info "  VPC CIDR: $final_vpc_cidr" >&2
+        print_info "  Private Subnet CIDR: $final_private_cidr" >&2
+        print_info "  Public Subnet CIDR: $final_public_cidr" >&2
     else
-        print_success "✅ No CIDR conflicts detected"
+        print_success "✅ No CIDR conflicts detected" >&2
     fi
     
     echo "$final_vpc_cidr|$final_private_cidr|$final_public_cidr"
