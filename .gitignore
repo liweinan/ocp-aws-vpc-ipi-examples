@@ -92,6 +92,10 @@ backups/
 script-backup/
 *-backup/
 
+# Cluster logs directory
+cluster-logs/
+*/cluster-logs/
+
 # Ignore log, report, and output files
 *.log
 *.txt
