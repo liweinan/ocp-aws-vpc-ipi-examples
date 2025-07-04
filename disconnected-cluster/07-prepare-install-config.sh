@@ -219,6 +219,12 @@ imageContentSources:
   - localhost:$registry_port/openshift/ocp/release
   source: registry.ci.openshift.org/origin/release
 - mirrors:
+  - localhost:$registry_port/openshift/ocp/release
+  source: registry.ci.openshift.org/origin/release:4.19
+- mirrors:
+  - localhost:$registry_port/openshift/ocp/release
+  source: registry.ci.openshift.org/origin/release:4.19.2
+- mirrors:
   - localhost:$registry_port/openshift/installer
   source: registry.ci.openshift.org/ocp/4.19.2/installer
 - mirrors:
