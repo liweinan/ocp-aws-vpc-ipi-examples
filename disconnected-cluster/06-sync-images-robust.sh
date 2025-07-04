@@ -61,9 +61,9 @@ core_images=(
 
 # Define release images (critical for bootstrap)
 release_images=(
-    "origin/release:4.19"
     "ocp/release:4.19.2"
-    "openshift/release:4.19.2"
+    "ocp/release:4.19.0"
+    "ocp/release:4.19"
 )
 
 # Define additional important images
@@ -94,41 +94,28 @@ for img in "${release_images[@]}"; do
     echo ""
     echo -e "${BLUE}[${current_count}/${total_images}] Processing release image: ${img}${NC}"
     
-    # Handle special case for origin/release images
-    if [[ "$img" == origin/release:* ]]; then
-        # For origin/release, we need to sync from registry.ci.openshift.org
-        local src_image="registry.ci.openshift.org/${img}"
-        local dst_image="localhost:${REGISTRY_PORT}/openshift/${img}"
-        
-        echo -e "${BLUE}   Syncing: ${src_image} -> ${dst_image}${NC}"
-        
-        # Use skopeo to sync the image
-        if sudo -E skopeo copy --tls-verify=false --dest-tls-verify=false \
-            --dest-authfile <(echo "{\"auths\":{\"localhost:${REGISTRY_PORT}\":{\"auth\":\"$(echo -n ${REGISTRY_USER}:${REGISTRY_PASSWORD} | base64)\"}}}" | jq .) \
-            "docker://${src_image}" "docker://${dst_image}"; then
-            echo -e "${GREEN}   ✅ Successfully synced ${img}${NC}"
+    # Parse image name and tag
+    img_name=$(echo "$img" | cut -d':' -f1)
+    img_tag=$(echo "$img" | cut -d':' -f2)
+    
+    # Check if image already exists
+    repo_path=""
+    if [[ "$img_name" == */* ]]; then
+        repo_path="openshift/${img_name}"
+    else
+        repo_path="openshift/${img_name}"
+    fi
+    
+    if curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/${repo_path}/tags/list" 2>/dev/null | grep -q "${img_tag}"; then
+        echo -e "${YELLOW}   ⏭️  Already exists in registry, skipping${NC}"
+        skipped_count=$((skipped_count + 1))
+    else
+        # Call single sync script for all images
+        if sudo -E "$SINGLE_SYNC_SCRIPT" "$img_name" "$img_tag" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"; then
             synced_count=$((synced_count + 1))
         else
             echo -e "${RED}   ❌ Failed to sync ${img}${NC}"
             failed_count=$((failed_count + 1))
-        fi
-    else
-        # For other release images, use standard sync method
-        local img_name=$(echo "$img" | cut -d':' -f1)
-        local img_tag=$(echo "$img" | cut -d':' -f2)
-        
-        # Check if image already exists
-        if curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/openshift/${img_name}/tags/list" 2>/dev/null | grep -q "${img_tag}"; then
-            echo -e "${YELLOW}   ⏭️  Already exists in registry, skipping${NC}"
-            skipped_count=$((skipped_count + 1))
-        else
-            # Call single sync script
-            if sudo -E "$SINGLE_SYNC_SCRIPT" "$img_name" "$img_tag" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"; then
-                synced_count=$((synced_count + 1))
-            else
-                echo -e "${RED}   ❌ Failed to sync ${img}${NC}"
-                failed_count=$((failed_count + 1))
-            fi
         fi
     fi
     
@@ -247,7 +234,13 @@ fi
 
 # Generate summary
 sync_dir="/home/ubuntu/openshift-sync"
+# Ensure directory exists with correct permissions
 mkdir -p "${sync_dir}"
+# Fix ownership if directory was created with wrong permissions
+if [[ ! -w "${sync_dir}" ]]; then
+    echo "Fixing directory permissions for ${sync_dir}..."
+    sudo chown -R ubuntu:ubuntu "${sync_dir}" 2>/dev/null || true
+fi
 
 cat > "${sync_dir}/sync-summary.txt" <<EOF
 OpenShift Image Synchronization Summary

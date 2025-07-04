@@ -24,31 +24,6 @@ CI_REGISTRY="registry.ci.openshift.org"
 LOCAL_REGISTRY="localhost:${REGISTRY_PORT}"
 OPENSHIFT_VERSION="4.19.2"
 
-# Function to sync image using skopeo
-sync_image_with_skopeo() {
-    local src_image="$1"
-    local dst_image="$2"
-    
-    echo -e "${BLUE}   📥 Syncing with skopeo: ${src_image} -> ${dst_image}${NC}"
-    
-    # Create auth file for local registry
-    local auth_file="/tmp/auth-${RANDOM}.json"
-    echo "{\"auths\":{\"${LOCAL_REGISTRY}\":{\"auth\":\"$(echo -n ${REGISTRY_USER}:${REGISTRY_PASSWORD} | base64)\"}}}" > "$auth_file"
-    
-    # Use skopeo to copy the image
-    if sudo -E skopeo copy \
-        --tls-verify=false \
-        --dest-tls-verify=false \
-        --dest-authfile "$auth_file" \
-        "docker://${src_image}" \
-        "docker://${dst_image}"; then
-        rm -f "$auth_file"
-        return 0
-    else
-        rm -f "$auth_file"
-        return 1
-    fi
-}
 
 # Function to sync image using podman
 sync_image_with_podman() {
@@ -83,35 +58,26 @@ sync_image() {
     # Determine source image path
     local src_image
     if [[ "$image_name" == */* ]]; then
-        # Image name contains path (e.g., origin/release)
+        # Image name contains path (e.g., origin/release, ocp/release)
         src_image="${CI_REGISTRY}/${image_name}:${image_tag}"
     else
         # Standard OpenShift image
         src_image="${CI_REGISTRY}/openshift/${image_name}:${image_tag}"
     fi
     
-    # Determine destination image path
+    # Determine destination image path - always store under openshift/ namespace
     local dst_image="${LOCAL_REGISTRY}/openshift/${image_name}:${image_tag}"
     
     echo -e "${BLUE}🔄 Syncing image: ${image_name}:${image_tag}${NC}"
     echo "   Source: ${src_image}"
     echo "   Destination: ${dst_image}"
     
-    # Try skopeo first, then podman as fallback
-    if command -v skopeo &> /dev/null; then
-        if sync_image_with_skopeo "$src_image" "$dst_image"; then
-            echo -e "${GREEN}   ✅ Successfully synced with skopeo${NC}"
-            return 0
-        else
-            echo -e "${YELLOW}   ⚠️  Skopeo sync failed, trying podman...${NC}"
-        fi
-    fi
-    
+    # Use podman for image sync
     if sync_image_with_podman "$src_image" "$dst_image"; then
         echo -e "${GREEN}   ✅ Successfully synced with podman${NC}"
         return 0
     else
-        echo -e "${RED}   ❌ Failed to sync with both skopeo and podman${NC}"
+        echo -e "${RED}   ❌ Failed to sync with podman${NC}"
         return 1
     fi
 }
@@ -123,8 +89,8 @@ if [[ $# -ne 5 ]]; then
 fi
 
 # Check if required tools are available
-if ! command -v skopeo &> /dev/null && ! command -v podman &> /dev/null; then
-    echo -e "${RED}❌ Neither skopeo nor podman is available${NC}"
+if ! command -v podman &> /dev/null; then
+    echo -e "${RED}❌ Podman is not available${NC}"
     exit 1
 fi
 
