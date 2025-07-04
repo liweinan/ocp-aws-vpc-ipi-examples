@@ -18,9 +18,10 @@ DEFAULT_REGION="us-east-1"
 DEFAULT_REGISTRY_PORT="5000"
 DEFAULT_REGISTRY_USER="admin"
 DEFAULT_REGISTRY_PASSWORD="admin123"
-DEFAULT_INSTALL_DIR="./openshift-install"
+DEFAULT_INSTALL_DIR="./openshift-install-dir"
 DEFAULT_SSH_KEY="~/.ssh/id_rsa.pub"
 DEFAULT_BASTION_KEY="./infra-output/bastion-key.pem"
+DEFAULT_OPENSHIFT_VERSION="4.19.2"
 
 # Colors for output
 RED='\033[0;31m'
@@ -232,7 +233,7 @@ check_registry_status() {
     echo -e "${BLUE}🔍 Checking registry status...${NC}"
     
     # Check if registry container is running
-    if podman ps --format "table {{.Names}}" | grep -q "registry"; then
+    if sudo -E podman ps --format "table {{.Names}}" | grep -q "registry"; then
         echo -e "${GREEN}✅ Registry container is running${NC}"
     else
         echo -e "${YELLOW}⚠️  Registry container is not running${NC}"
@@ -250,9 +251,68 @@ check_registry_status() {
     fi
 }
 
+# Function to install OpenShift installer from local registry
+install_openshift_installer() {
+    local registry_url="$1"
+    local registry_user="$2"
+    local registry_password="$3"
+    local openshift_version="$4"
+    
+    echo -e "${BLUE}🔧 Installing OpenShift installer from local registry...${NC}"
+    
+    # Check if installer image exists in local registry
+    if ! curl -k -s -u "${registry_user}:${registry_password}" "https://${registry_url}/v2/openshift/installer/tags/list" | grep -q "${openshift_version}"; then
+        echo -e "${RED}❌ OpenShift installer image not found in local registry${NC}"
+        echo "   Run ./06-sync-images-robust.sh to sync the installer image first"
+        return 1
+    fi
+    
+    # Pull installer image from local registry
+    echo -e "${BLUE}📥 Pulling installer image from local registry...${NC}"
+    if ! sudo -E podman pull "${registry_url}/openshift/installer:${openshift_version}" --tls-verify=false; then
+        echo -e "${RED}❌ Failed to pull installer image${NC}"
+        return 1
+    fi
+    
+    # Extract installer binary from container
+    echo -e "${BLUE}🔧 Extracting installer binary...${NC}"
+    local temp_container="temp-installer-$$"
+    
+    if ! sudo -E podman create --name "${temp_container}" "${registry_url}/openshift/installer:${openshift_version}"; then
+        echo -e "${RED}❌ Failed to create temporary container${NC}"
+        return 1
+    fi
+    
+    # Copy installer binary
+    if ! sudo -E podman cp "${temp_container}:/usr/bin/openshift-install" ./openshift-install; then
+        echo -e "${RED}❌ Failed to copy installer binary${NC}"
+        sudo -E podman rm "${temp_container}" &> /dev/null
+        return 1
+    fi
+    
+    # Clean up temporary container
+    sudo -E podman rm "${temp_container}" &> /dev/null
+    
+    # Set permissions and move to PATH
+    sudo chmod +x ./openshift-install
+    sudo mv ./openshift-install /usr/local/bin/
+    
+    echo -e "${GREEN}✅ OpenShift installer installed successfully${NC}"
+    openshift-install version
+    
+    # Clean up installer image to save space
+    sudo -E podman rmi "${registry_url}/openshift/installer:${openshift_version}" &> /dev/null || true
+    
+    return 0
+}
+
 # Function to check OpenShift installer availability
 check_installer() {
     local install_dir="$1"
+    local registry_url="$2"
+    local registry_user="$3"
+    local registry_password="$4"
+    local openshift_version="$5"
     
     echo -e "${BLUE}🔍 Checking OpenShift installer availability...${NC}"
     
@@ -263,9 +323,17 @@ check_installer() {
         echo -e "${GREEN}✅ OpenShift installer found in installation directory${NC}"
         "$install_dir/openshift-install" version
     else
-        echo -e "${YELLOW}⚠️  OpenShift installer not found in PATH or installation directory${NC}"
-        echo "   The installer should be available from previous steps (03-sync-images.sh)"
-        echo "   If needed, you can download it manually from the OpenShift mirror"
+        echo -e "${YELLOW}⚠️  OpenShift installer not found, attempting to install...${NC}"
+        
+        # Try to install from local registry
+        if install_openshift_installer "${registry_url}" "${registry_user}" "${registry_password}" "${openshift_version}"; then
+            echo -e "${GREEN}✅ OpenShift installer installed successfully${NC}"
+        else
+            echo -e "${RED}❌ Failed to install OpenShift installer${NC}"
+            echo "   Please ensure the installer image is available in the local registry"
+            echo "   Run ./06-sync-images-robust.sh to sync all required images"
+            return 1
+        fi
     fi
 }
 
@@ -456,6 +524,7 @@ main() {
     PULL_SECRET=${PULL_SECRET:-}
     INFRA_OUTPUT_DIR=${INFRA_OUTPUT_DIR:-$DEFAULT_INFRA_OUTPUT_DIR}
     SYNC_OUTPUT_DIR=${SYNC_OUTPUT_DIR:-$DEFAULT_SYNC_OUTPUT_DIR}
+    OPENSHIFT_VERSION=${OPENSHIFT_VERSION:-$DEFAULT_OPENSHIFT_VERSION}
 
     DRY_RUN=${DRY_RUN:-no}
     BASTION_KEY=${BASTION_KEY:-$DEFAULT_BASTION_KEY}
@@ -501,7 +570,7 @@ main() {
         check_registry_status "$REGISTRY_PORT"
         
         # Check OpenShift installer availability
-        check_installer "$INSTALL_DIR"
+        check_installer "$INSTALL_DIR" "localhost:$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD" "$OPENSHIFT_VERSION"
         
         # Backup install-config.yaml before it gets consumed
         backup_install_config "$INSTALL_DIR"
