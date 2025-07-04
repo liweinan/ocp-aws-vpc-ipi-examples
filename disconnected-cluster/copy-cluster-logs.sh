@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 BASTION_HOST="72.44.62.16"
 BASTION_USER="ubuntu"
 SSH_KEY="infra-output/bastion-key.pem"
-REMOTE_DIR="/home/ubuntu/disconnected-cluster/openshift-install-dir"
+REMOTE_DIR="/home/ubuntu/openshift-install-dir"
 LOCAL_DIR="cluster-logs"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 

@@ -210,11 +210,14 @@ additionalTrustBundle: |
 $(echo "$registry_cert" | sed 's/^/  /')
 imageContentSources:
 - mirrors:
-  - localhost:$registry_port/openshift
+  - localhost:$registry_port/openshift/ocp/release
   source: registry.ci.openshift.org/ocp/4.19.2
 - mirrors:
-  - localhost:$registry_port/openshift
+  - localhost:$registry_port/openshift/ocp/release
   source: registry.ci.openshift.org/ocp/4.19
+- mirrors:
+  - localhost:$registry_port/openshift/ocp/release
+  source: registry.ci.openshift.org/origin/release
 - mirrors:
   - localhost:$registry_port/openshift
   source: registry.ci.openshift.org/openshift

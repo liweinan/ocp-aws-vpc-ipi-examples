@@ -279,8 +279,14 @@ metadata:
 spec:
   repositoryDigestMirrors:
   - mirrors:
-    - localhost:${REGISTRY_PORT}/openshift
-    source: registry.ci.openshift.org/ocp/${OPENSHIFT_VERSION}
+    - localhost:${REGISTRY_PORT}/openshift/ocp/release
+    source: registry.ci.openshift.org/ocp/4.19.2
+  - mirrors:
+    - localhost:${REGISTRY_PORT}/openshift/ocp/release
+    source: registry.ci.openshift.org/ocp/4.19
+  - mirrors:
+    - localhost:${REGISTRY_PORT}/openshift/ocp/release
+    source: registry.ci.openshift.org/origin/release
   - mirrors:
     - localhost:${REGISTRY_PORT}/openshift
     source: registry.ci.openshift.org/openshift
@@ -298,6 +304,38 @@ EOF
 echo ""
 echo -e "${BLUE}📄 Summary saved to: ${sync_dir}/sync-summary.txt${NC}"
 echo -e "${BLUE}📄 ImageContentSources saved to: ${sync_dir}/imageContentSources.yaml${NC}"
+
+# Fix missing image tags for bootstrap compatibility
+echo ""
+echo -e "${BLUE}🔧 Fixing missing image tags for bootstrap compatibility...${NC}"
+
+# Check if 4.19 tag exists for ocp/release
+if curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/openshift/ocp/release/tags/list" | grep -q '"4.19"'; then
+    echo -e "${GREEN}✅ Tag 4.19 already exists for ocp/release${NC}"
+else
+    echo -e "${YELLOW}⚠️  Tag 4.19 missing for ocp/release, creating from 4.19.0...${NC}"
+    
+    # Pull the 4.19.0 image
+    echo -e "${BLUE}📥 Pulling 4.19.0 image...${NC}"
+    if sudo podman pull "localhost:${REGISTRY_PORT}/openshift/ocp/release:4.19.0" --tls-verify=false; then
+        # Tag it as 4.19
+        echo -e "${BLUE}🏷️  Creating 4.19 tag...${NC}"
+        sudo podman tag "localhost:${REGISTRY_PORT}/openshift/ocp/release:4.19.0" "localhost:${REGISTRY_PORT}/openshift/ocp/release:4.19"
+        
+        # Push the new tag
+        echo -e "${BLUE}📤 Pushing 4.19 tag...${NC}"
+        if sudo podman push "localhost:${REGISTRY_PORT}/openshift/ocp/release:4.19" --tls-verify=false; then
+            echo -e "${GREEN}✅ Tag 4.19 created successfully${NC}"
+        else
+            echo -e "${RED}❌ Failed to push 4.19 tag${NC}"
+        fi
+    else
+        echo -e "${RED}❌ Failed to pull 4.19.0 image${NC}"
+    fi
+fi
+
+echo -e "${BLUE}📋 Final ocp/release tags:${NC}"
+curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/openshift/ocp/release/tags/list" 2>/dev/null | jq '.' || echo "Unable to fetch tags"
 
 # Return success if most images are available in registry (either synced or already existed)
 available_images=$((synced_count + skipped_count))
