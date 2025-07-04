@@ -2,7 +2,7 @@
 
 # Robust Image Synchronization Script for Disconnected OpenShift Cluster
 # This script syncs images from OpenShift CI cluster to local mirror registry
-# Uses individual sync scripts for better fault tolerance
+# Uses simplified single-image script for better reliability
 
 set -euo pipefail
 
@@ -81,16 +81,16 @@ current_count=0
 echo -e "${BLUE}📦 Syncing core images (${#core_images[@]} images)...${NC}"
 
 for img in "${core_images[@]}"; do
-    ((current_count++))
+    current_count=$((current_count + 1))
     echo ""
     echo -e "${BLUE}[${current_count}/${total_images}] Processing core image: ${img}${NC}"
     
-    # Call single sync script
-    if "$SINGLE_SYNC_SCRIPT" "$img" "$OPENSHIFT_VERSION" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"; then
-        ((synced_count++))
+    # Call single sync script (script handles sudo internally)
+    if sudo -E "$SINGLE_SYNC_SCRIPT" "$img" "$OPENSHIFT_VERSION" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"; then
+        synced_count=$((synced_count + 1))
     else
         echo -e "${RED}   ❌ Failed to sync ${img}${NC}"
-        ((failed_count++))
+        failed_count=$((failed_count + 1))
     fi
     
     # Brief pause between images
@@ -101,16 +101,16 @@ echo ""
 echo -e "${BLUE}📦 Syncing additional images (${#additional_images[@]} images)...${NC}"
 
 for img in "${additional_images[@]}"; do
-    ((current_count++))
+    current_count=$((current_count + 1))
     echo ""
     echo -e "${BLUE}[${current_count}/${total_images}] Processing additional image: ${img}${NC}"
     
-    # Call single sync script
-    if "$SINGLE_SYNC_SCRIPT" "$img" "$OPENSHIFT_VERSION" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"; then
-        ((synced_count++))
+    # Call single sync script (script handles sudo internally)
+    if sudo -E "$SINGLE_SYNC_SCRIPT" "$img" "$OPENSHIFT_VERSION" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"; then
+        synced_count=$((synced_count + 1))
     else
         echo -e "${RED}   ❌ Failed to sync ${img}${NC}"
-        ((failed_count++))
+        failed_count=$((failed_count + 1))
     fi
     
     # Brief pause between images
