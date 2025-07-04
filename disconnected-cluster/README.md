@@ -34,7 +34,7 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 | `03-copy-credentials.sh` | 复制凭证 | 将AWS凭证、SSH密钥和pull secret复制到bastion host |
 | `04-copy-infra-and-tools.sh` | 复制基础设施信息和工具 | 将基础设施信息和工具复制到bastion host，安装所有依赖 |
 | `05-setup-mirror-registry.sh` | 搭建镜像仓库 | 在bastion host上部署私有镜像仓库 |
-| `06-sync-images.sh` | 同步镜像 | 从外部同步OpenShift镜像到私有仓库 |
+| `06-sync-images-robust.sh` | 同步镜像 | 从OpenShift CI集群同步镜像到私有仓库，使用改进的重试机制 |
 | `07-prepare-install-config.sh` | 准备安装配置 | 生成disconnected cluster的安装配置 |
 | `08-install-cluster.sh` | 安装集群 | 创建manifests、修改配置、安装OpenShift集群 |
 | `09-verify-cluster.sh` | 验证集群 | 验证集群功能和镜像仓库配置 |
@@ -47,11 +47,51 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 
 | 脚本 | 用途 | 说明 |
 |------|------|------|
+| `sync-single-image.sh` | 单镜像同步 | 处理单个镜像的pull+push，包含重试机制 |
 | `simple-sync.sh` | 简单镜像同步 | 简化的镜像同步脚本 |
 | `check-sync-status.sh` | 检查同步状态 | 检查镜像同步状态 |
 | `copy-from-bastion.sh` | 从bastion复制文件 | 从bastion host复制文件到本地 |
 | `force-delete-vpc.sh` | 强制删除VPC | 强制删除VPC和相关资源 |
 | `test-ami.sh` | 测试AMI | 测试AMI可用性 |
+
+## 镜像同步架构
+
+镜像同步过程采用了两层架构，确保最大的可靠性：
+
+### 架构说明
+
+1. **主脚本**: `06-sync-images-robust.sh`
+   - 负责循环调用单镜像同步脚本
+   - 处理21个OpenShift核心镜像
+   - 生成同步总结和ImageContentSources配置
+
+2. **单镜像脚本**: `sync-single-image.sh`
+   - 处理单个镜像的完整同步流程
+   - 包含重试机制（最多3次尝试）
+   - 自动清理本地镜像释放空间
+   - 关键改进：每次同步前重新登录registry
+
+### 关键改进
+
+基于实际测试经验，镜像同步脚本包含以下关键改进：
+
+1. **Registry重新登录**: 每次同步前重新登录CI registry和本地registry，确保认证不过期
+2. **详细输出显示**: 完整显示podman pull和push的进度信息
+3. **磁盘空间监控**: 自动监控并清理临时镜像文件
+4. **错误处理**: 完整的错误处理和重试机制
+
+### 使用示例
+
+```bash
+# 在bastion host上运行（需要先登录CI集群）
+oc login --token=<YOUR_TOKEN> --server=https://api.ci.l2s4.p1.openshiftapps.com:6443
+
+# 运行完整的镜像同步
+sudo ./06-sync-images-robust.sh
+
+# 或者指定集群名称和版本
+sudo ./06-sync-images-robust.sh my-cluster 4.19.2
+```
 
 ## 前置条件
 
@@ -92,7 +132,7 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 ./05-setup-mirror-registry.sh --cluster-name my-disconnected-cluster
 
 # 6. 同步镜像（需要网络连接）
-./06-sync-images.sh --cluster-name my-disconnected-cluster --openshift-version 4.18.15
+./06-sync-images-robust.sh my-disconnected-cluster 4.18.15
 
 # 7. 准备安装配置
 ./07-prepare-install-config.sh --cluster-name my-disconnected-cluster --base-domain example.com

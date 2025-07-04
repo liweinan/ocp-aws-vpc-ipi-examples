@@ -25,7 +25,8 @@ scp -i "$SSH_KEY" -o StrictHostKeyChecking=no -r ./infra-output ubuntu@"$BASTION
 # 3. 拷贝安装相关脚本到 bastion
 printf "${BLUE}📦 拷贝安装相关脚本到 bastion...${NC}\n"
 scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./05-setup-mirror-registry.sh ubuntu@"$BASTION_IP":/home/ubuntu/disconnected-cluster/ 2>/dev/null || echo "05-setup-mirror-registry.sh not found, skipping..."
-scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./06-sync-images.sh ubuntu@"$BASTION_IP":/home/ubuntu/disconnected-cluster/ 2>/dev/null || echo "06-sync-images.sh not found, skipping..."
+scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./06-sync-images-robust.sh ubuntu@"$BASTION_IP":/home/ubuntu/disconnected-cluster/ 2>/dev/null || echo "06-sync-images-robust.sh not found, skipping..."
+scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./sync-single-image.sh ubuntu@"$BASTION_IP":/home/ubuntu/disconnected-cluster/ 2>/dev/null || echo "sync-single-image.sh not found, skipping..."
 scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./07-prepare-install-config.sh ubuntu@"$BASTION_IP":/home/ubuntu/disconnected-cluster/ 2>/dev/null || echo "07-prepare-install-config.sh not found, skipping..."
 scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./08-install-cluster.sh ubuntu@"$BASTION_IP":/home/ubuntu/disconnected-cluster/ 2>/dev/null || echo "08-install-cluster.sh not found, skipping..."
 scp -i "$SSH_KEY" -o StrictHostKeyChecking=no ./09-verify-cluster.sh ubuntu@"$BASTION_IP":/home/ubuntu/disconnected-cluster/ 2>/dev/null || echo "09-verify-cluster.sh not found, skipping..."
@@ -118,8 +119,8 @@ ssh -i "$SSH_KEY" ubuntu@"$BASTION_IP" -o StrictHostKeyChecking=no '
 
 printf "${GREEN}✅ 所有内容和依赖已准备好，可在 bastion host 上执行后续步骤：${NC}\n"
 printf "${GREEN}   - 05-setup-mirror-registry.sh (设置镜像仓库)${NC}\n"
-printf "${GREEN}   - 06-sync-images.sh (同步镜像)${NC}\n"
+printf "${GREEN}   - 06-sync-images-robust.sh (同步镜像，改进版)${NC}\n"
 printf "${GREEN}   - 07-prepare-install-config.sh (准备安装配置)${NC}\n"
 printf "${GREEN}   - 08-install-cluster.sh (安装集群)${NC}\n"
 printf "${GREEN}   - 09-verify-cluster.sh (验证集群)${NC}\n"
-printf "${YELLOW}📝 注意：所有工具已安装完毕，可以直接执行后续步骤${NC}\n" 
+printf "${YELLOW}📝 注意：所有工具已安装完毕，镜像同步脚本已更新为改进版本${NC}\n" 
