@@ -69,13 +69,14 @@ additional_images=(
     "aws-ebs-csi-driver-operator"
     "cluster-monitoring-operator"
     "prometheus-operator"
-    "node-exporter"
+    "prometheus-node-exporter"
     "kube-state-metrics"
 )
 
 total_images=$((${#core_images[@]} + ${#additional_images[@]}))
 synced_count=0
 failed_count=0
+skipped_count=0
 current_count=0
 
 echo -e "${BLUE}📦 Syncing core images (${#core_images[@]} images)...${NC}"
@@ -85,12 +86,18 @@ for img in "${core_images[@]}"; do
     echo ""
     echo -e "${BLUE}[${current_count}/${total_images}] Processing core image: ${img}${NC}"
     
-    # Call single sync script (script handles sudo internally)
-    if sudo -E "$SINGLE_SYNC_SCRIPT" "$img" "$OPENSHIFT_VERSION" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"; then
-        synced_count=$((synced_count + 1))
+    # Check if image already exists before attempting sync
+    if curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/openshift/${img}/tags/list" 2>/dev/null | grep -q "${OPENSHIFT_VERSION}"; then
+        echo -e "${YELLOW}   ⏭️  Already exists in registry, skipping${NC}"
+        skipped_count=$((skipped_count + 1))
     else
-        echo -e "${RED}   ❌ Failed to sync ${img}${NC}"
-        failed_count=$((failed_count + 1))
+        # Call single sync script (script handles sudo internally)
+        if sudo -E "$SINGLE_SYNC_SCRIPT" "$img" "$OPENSHIFT_VERSION" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"; then
+            synced_count=$((synced_count + 1))
+        else
+            echo -e "${RED}   ❌ Failed to sync ${img}${NC}"
+            failed_count=$((failed_count + 1))
+        fi
     fi
     
     # Brief pause between images
@@ -105,12 +112,18 @@ for img in "${additional_images[@]}"; do
     echo ""
     echo -e "${BLUE}[${current_count}/${total_images}] Processing additional image: ${img}${NC}"
     
-    # Call single sync script (script handles sudo internally)
-    if sudo -E "$SINGLE_SYNC_SCRIPT" "$img" "$OPENSHIFT_VERSION" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"; then
-        synced_count=$((synced_count + 1))
+    # Check if image already exists before attempting sync
+    if curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/openshift/${img}/tags/list" 2>/dev/null | grep -q "${OPENSHIFT_VERSION}"; then
+        echo -e "${YELLOW}   ⏭️  Already exists in registry, skipping${NC}"
+        skipped_count=$((skipped_count + 1))
     else
-        echo -e "${RED}   ❌ Failed to sync ${img}${NC}"
-        failed_count=$((failed_count + 1))
+        # Call single sync script (script handles sudo internally)
+        if sudo -E "$SINGLE_SYNC_SCRIPT" "$img" "$OPENSHIFT_VERSION" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"; then
+            synced_count=$((synced_count + 1))
+        else
+            echo -e "${RED}   ❌ Failed to sync ${img}${NC}"
+            failed_count=$((failed_count + 1))
+        fi
     fi
     
     # Brief pause between images
@@ -120,8 +133,42 @@ done
 echo ""
 echo -e "${GREEN}✅ Image synchronization completed${NC}"
 echo "   Successfully synced: ${synced_count} images"
+echo "   Already existed (skipped): ${skipped_count} images"
 echo "   Failed: ${failed_count} images"
 echo "   Total processed: ${current_count}/${total_images} images"
+
+# Verify all expected images are in registry
+echo ""
+echo -e "${BLUE}🔍 Verifying registry contents...${NC}"
+all_expected_images=("${core_images[@]}" "${additional_images[@]}")
+registry_catalog=$(curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/_catalog" 2>/dev/null || echo '{"repositories":[]}')
+missing_images=()
+verified_count=0
+
+for img in "${all_expected_images[@]}"; do
+    expected_repo="openshift/${img}"
+    if echo "$registry_catalog" | jq -r '.repositories[]' | grep -q "^${expected_repo}$"; then
+        # Double check the specific version tag exists
+        if curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/openshift/${img}/tags/list" 2>/dev/null | grep -q "${OPENSHIFT_VERSION}"; then
+            verified_count=$((verified_count + 1))
+        else
+            missing_images+=("${img} (version ${OPENSHIFT_VERSION} missing)")
+        fi
+    else
+        missing_images+=("${img} (repository missing)")
+    fi
+done
+
+echo "   Verified in registry: ${verified_count}/${total_images} images"
+
+if [[ ${#missing_images[@]} -gt 0 ]]; then
+    echo -e "${YELLOW}   ⚠️  Missing images:${NC}"
+    for missing in "${missing_images[@]}"; do
+        echo "     - ${missing}"
+    done
+else
+    echo -e "${GREEN}   ✅ All expected images verified in registry${NC}"
+fi
 
 # Generate summary
 sync_dir="/home/ubuntu/openshift-sync"
@@ -137,7 +184,9 @@ Registry: localhost:${REGISTRY_PORT}
 
 Results:
 - Successfully synced: ${synced_count} images
+- Already existed (skipped): ${skipped_count} images  
 - Failed: ${failed_count} images
+- Verified in registry: ${verified_count} images
 - Total processed: ${current_count}/${total_images} images
 
 Core Images (${#core_images[@]}):
@@ -176,19 +225,29 @@ echo ""
 echo -e "${BLUE}📄 Summary saved to: ${sync_dir}/sync-summary.txt${NC}"
 echo -e "${BLUE}📄 ImageContentSources saved to: ${sync_dir}/imageContentSources.yaml${NC}"
 
-# Return success if most images synced
-if [[ $synced_count -ge $((total_images * 80 / 100)) ]]; then
+# Return success if most images are available in registry (either synced or already existed)
+available_images=$((synced_count + skipped_count))
+if [[ $verified_count -ge $((total_images * 90 / 100)) && $available_images -ge $((total_images * 90 / 100)) ]]; then
     echo ""
     echo -e "${GREEN}🎉 Robust image synchronization completed successfully!${NC}"
     echo ""
+    echo -e "${BLUE}📊 Final Status:${NC}"
+    echo "   ✅ Available in registry: ${available_images}/${total_images} images (${verified_count} verified)"
+    echo "   📦 Newly synced: ${synced_count} images"
+    echo "   ⏭️  Already existed: ${skipped_count} images"
+    echo "   ❌ Failed: ${failed_count} images"
+    echo ""
     echo -e "${BLUE}📋 Next steps:${NC}"
-    echo "   1. Verify images: curl -k -u admin:admin123 'https://localhost:5000/v2/_catalog'"
-    echo "   2. Run ./07-prepare-install-config.sh to prepare installation"
-    echo "   3. Run ./08-install-cluster.sh to install the cluster"
+    echo "   1. Run ./07-prepare-install-config.sh to prepare installation"
+    echo "   2. Run ./08-install-cluster.sh to install the cluster"
+    echo "   3. Verify with: curl -k -u admin:admin123 'https://localhost:5000/v2/_catalog'"
     exit 0
 else
     echo ""
-    echo -e "${YELLOW}⚠️  Warning: Only ${synced_count}/${total_images} images synced successfully${NC}"
+    echo -e "${YELLOW}⚠️  Warning: Only ${verified_count}/${total_images} images verified in registry${NC}"
+    echo "   Available: ${available_images} (synced: ${synced_count}, existed: ${skipped_count})"
+    echo "   Failed: ${failed_count}"
+    echo ""
     echo "You may want to retry failed images or check connectivity"
     exit 1
 fi 
