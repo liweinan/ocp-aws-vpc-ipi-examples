@@ -1,0 +1,433 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'VPC infrastructure for disconnected OpenShift cluster with all required VPC endpoints'
+
+Parameters:
+  ClusterName:
+    Type: String
+    Default: 'disconnected-cluster'
+    Description: 'Name of the OpenShift cluster'
+  
+  VpcCidr:
+    Type: String
+    Default: '10.0.0.0/16'
+    Description: 'CIDR block for the VPC'
+  
+  PrivateSubnetCidr:
+    Type: String
+    Default: '10.0.100.0/24'
+    Description: 'CIDR block for the private subnet'
+  
+  PublicSubnetCidr:
+    Type: String
+    Default: '10.0.10.0/24'
+    Description: 'CIDR block for the public subnet'
+  
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: 'Availability zone for subnets'
+  
+  SNOMode:
+    Type: String
+    Default: 'yes'
+    AllowedValues: ['yes', 'no']
+    Description: 'Enable Single Node OpenShift (SNO) mode'
+
+Resources:
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-vpc'
+        - Key: !Sub 'kubernetes.io/cluster/${ClusterName}'
+          Value: 'shared'
+
+  # Internet Gateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-igw'
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Public Subnet
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !Ref AvailabilityZone
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-public-1'
+        - Key: kubernetes.io/role/elb
+          Value: '1'
+        - Key: kubernetes.io/cluster/unmanaged
+          Value: 'true'
+
+  # Private Subnet
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetCidr
+      AvailabilityZone: !Ref AvailabilityZone
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-private-1'
+        - Key: kubernetes.io/role/internal-elb
+          Value: '1'
+
+  # Route Tables
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-public-rt'
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-private-rt'
+
+  PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+  # Security Group for VPC Endpoints
+  VPCEndpointsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ClusterName}-vpc-endpoints-sg'
+      GroupDescription: 'Security group for VPC endpoints'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidr
+          Description: 'HTTPS access from VPC'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-vpc-endpoints-sg'
+
+  # S3 Gateway Endpoint (Free)
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PublicRouteTable
+        - !Ref PrivateRouteTable
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: '*'
+            Resource: '*'
+
+  # EC2 Interface Endpoint
+  EC2Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ec2'
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnet
+      SecurityGroupIds:
+        - !Ref VPCEndpointsSecurityGroup
+      PrivateDnsEnabled: true
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: '*'
+            Resource: '*'
+
+  # ELB Interface Endpoint
+  ELBEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.elasticloadbalancing'
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnet
+      SecurityGroupIds:
+        - !Ref VPCEndpointsSecurityGroup
+      PrivateDnsEnabled: true
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: '*'
+            Resource: '*'
+
+  # Route53 Interface Endpoint
+  Route53Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.route53'
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnet
+      SecurityGroupIds:
+        - !Ref VPCEndpointsSecurityGroup
+      PrivateDnsEnabled: true
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: '*'
+            Resource: '*'
+
+  # STS Interface Endpoint
+  STSEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.sts'
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnet
+      SecurityGroupIds:
+        - !Ref VPCEndpointsSecurityGroup
+      PrivateDnsEnabled: true
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: '*'
+            Resource: '*'
+
+  # EBS Interface Endpoint
+  EBSEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ebs'
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnet
+      SecurityGroupIds:
+        - !Ref VPCEndpointsSecurityGroup
+      PrivateDnsEnabled: true
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: '*'
+            Resource: '*'
+
+  # Bastion Security Group
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ClusterName}-bastion-sg'
+      GroupDescription: 'Security group for bastion host'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: '0.0.0.0/0'
+          Description: 'SSH access from anywhere'
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: '0.0.0.0/0'
+          Description: 'HTTP access from anywhere'
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: '0.0.0.0/0'
+          Description: 'HTTPS access from anywhere'
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          CidrIp: !Ref VpcCidr
+          Description: 'Registry access from VPC'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-bastion-sg'
+
+  # Cluster Security Group
+  ClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ClusterName}-${SNOMode == "yes" ? "sno" : "cluster"}-sg'
+      GroupDescription: !Sub 'Security group for OpenShift ${SNOMode == "yes" ? "SNO" : "multi-node"} cluster'
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-${SNOMode == "yes" ? "sno" : "cluster"}-sg'
+
+  # Allow all traffic within cluster security group
+  ClusterSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ClusterSecurityGroup
+      IpProtocol: '-1'
+      SourceSecurityGroupId: !Ref ClusterSecurityGroup
+      Description: 'Allow all traffic within cluster security group'
+
+  # Allow SSH from bastion to cluster
+  ClusterSecurityGroupSSHIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ClusterSecurityGroup
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      SourceSecurityGroupId: !Ref BastionSecurityGroup
+      Description: 'Allow SSH from bastion'
+
+  # Allow registry access from cluster
+  ClusterSecurityGroupRegistryIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ClusterSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5000
+      ToPort: 5000
+      SourceSecurityGroupId: !Ref ClusterSecurityGroup
+      Description: 'Allow registry access within cluster'
+
+Outputs:
+  VPCId:
+    Description: 'VPC ID'
+    Value: !Ref VPC
+    Export:
+      Name: !Sub '${ClusterName}-VPC-ID'
+
+  PublicSubnetId:
+    Description: 'Public subnet ID'
+    Value: !Ref PublicSubnet
+    Export:
+      Name: !Sub '${ClusterName}-PublicSubnet-ID'
+
+  PrivateSubnetId:
+    Description: 'Private subnet ID'
+    Value: !Ref PrivateSubnet
+    Export:
+      Name: !Sub '${ClusterName}-PrivateSubnet-ID'
+
+  AvailabilityZone:
+    Description: 'Availability zone used'
+    Value: !Ref AvailabilityZone
+    Export:
+      Name: !Sub '${ClusterName}-AZ'
+
+  VPCCidr:
+    Description: 'VPC CIDR block'
+    Value: !Ref VpcCidr
+    Export:
+      Name: !Sub '${ClusterName}-VPC-CIDR'
+
+  BastionSecurityGroupId:
+    Description: 'Bastion security group ID'
+    Value: !Ref BastionSecurityGroup
+    Export:
+      Name: !Sub '${ClusterName}-BastionSG-ID'
+
+  ClusterSecurityGroupId:
+    Description: 'Cluster security group ID'
+    Value: !Ref ClusterSecurityGroup
+    Export:
+      Name: !Sub '${ClusterName}-ClusterSG-ID'
+
+  VPCEndpointsSecurityGroupId:
+    Description: 'VPC endpoints security group ID'
+    Value: !Ref VPCEndpointsSecurityGroup
+    Export:
+      Name: !Sub '${ClusterName}-VPCEndpointsSG-ID'
+
+  S3EndpointId:
+    Description: 'S3 Gateway endpoint ID'
+    Value: !Ref S3Endpoint
+    Export:
+      Name: !Sub '${ClusterName}-S3Endpoint-ID'
+
+  EC2EndpointId:
+    Description: 'EC2 Interface endpoint ID'
+    Value: !Ref EC2Endpoint
+    Export:
+      Name: !Sub '${ClusterName}-EC2Endpoint-ID'
+
+  ELBEndpointId:
+    Description: 'ELB Interface endpoint ID'
+    Value: !Ref ELBEndpoint
+    Export:
+      Name: !Sub '${ClusterName}-ELBEndpoint-ID'
+
+  Route53EndpointId:
+    Description: 'Route53 Interface endpoint ID'
+    Value: !Ref Route53Endpoint
+    Export:
+      Name: !Sub '${ClusterName}-Route53Endpoint-ID'
+
+  STSEndpointId:
+    Description: 'STS Interface endpoint ID'
+    Value: !Ref STSEndpoint
+    Export:
+      Name: !Sub '${ClusterName}-STSEndpoint-ID'
+
+  EBSEndpointId:
+    Description: 'EBS Interface endpoint ID'
+    Value: !Ref EBSEndpoint
+    Export:
+      Name: !Sub '${ClusterName}-EBSEndpoint-ID'
+
+  NATGatewayId:
+    Description: 'NAT Gateway ID (none for disconnected cluster)'
+    Value: 'none'
+    Export:
+      Name: !Sub '${ClusterName}-NATGateway-ID'
+
+  ElasticIPId:
+    Description: 'Elastic IP ID (none for disconnected cluster)'
+    Value: 'none'
+    Export:
+      Name: !Sub '${ClusterName}-EIP-ID' 
