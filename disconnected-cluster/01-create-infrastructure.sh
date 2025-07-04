@@ -349,6 +349,217 @@ create_vpc_infrastructure() {
     echo "   NAT Gateway: None (disconnected cluster)"
 }
 
+# Function to create VPC endpoints for disconnected cluster
+create_vpc_endpoints() {
+    local cluster_name="$1"
+    local region="$2"
+    local vpc_id="$3"
+    local private_subnet_ids="$4"
+    local public_subnet_ids="$5"
+    local output_dir="$6"
+    
+    echo "🔗 Creating VPC endpoints for disconnected cluster..."
+    
+    # Create security group for VPC endpoints
+    echo "   Creating VPC endpoints security group..."
+    local endpoints_sg_id=$(aws ec2 create-security-group \
+        --group-name "${cluster_name}-vpc-endpoints-sg" \
+        --description "Security group for VPC endpoints" \
+        --vpc-id "$vpc_id" \
+        --region "$region" \
+        --tag-specifications "ResourceType=security-group,Tags=[{Key=Name,Value=${cluster_name}-vpc-endpoints-sg}]" \
+        --query 'GroupId' \
+        --output text)
+    
+    # Allow HTTPS traffic from VPC CIDR
+    local vpc_cidr=$(cat "$output_dir/vpc-cidr")
+    aws ec2 authorize-security-group-ingress \
+        --group-id "$endpoints_sg_id" \
+        --protocol tcp \
+        --port 443 \
+        --cidr "$vpc_cidr" \
+        --region "$region"
+    
+    # Get route table IDs for Gateway endpoints
+    local private_rt_id=$(aws ec2 describe-route-tables \
+        --region "$region" \
+        --filter "Name=vpc-id,Values=$vpc_id" "Name=tag:Name,Values=${cluster_name}-private-rt" \
+        --query 'RouteTables[0].RouteTableId' \
+        --output text)
+    
+    local public_rt_id=$(aws ec2 describe-route-tables \
+        --region "$region" \
+        --filter "Name=vpc-id,Values=$vpc_id" "Name=tag:Name,Values=${cluster_name}-public-rt" \
+        --query 'RouteTables[0].RouteTableId' \
+        --output text)
+    
+    # 1. Create S3 Gateway Endpoint (for bootstrap and worker nodes to access S3)
+    echo "   Creating S3 Gateway endpoint..."
+    local s3_endpoint_id=$(aws ec2 create-vpc-endpoint \
+        --vpc-id "$vpc_id" \
+        --service-name "com.amazonaws.${region}.s3" \
+        --vpc-endpoint-type Gateway \
+        --route-table-ids "$private_rt_id" "$public_rt_id" \
+        --policy-document '{
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": "*",
+                    "Action": "*",
+                    "Resource": "*"
+                }
+            ]
+        }' \
+        --region "$region" \
+        --tag-specifications "ResourceType=vpc-endpoint,Tags=[{Key=Name,Value=${cluster_name}-s3-endpoint}]" \
+        --query 'VpcEndpoint.VpcEndpointId' \
+        --output text)
+    
+    # 2. Create EC2 Interface Endpoint (for EC2 API calls)
+    echo "   Creating EC2 Interface endpoint..."
+    local ec2_endpoint_id=$(aws ec2 create-vpc-endpoint \
+        --vpc-id "$vpc_id" \
+        --service-name "com.amazonaws.${region}.ec2" \
+        --vpc-endpoint-type Interface \
+        --subnet-ids $(echo "$private_subnet_ids" | tr ',' ' ') \
+        --security-group-ids "$endpoints_sg_id" \
+        --policy-document '{
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": "*",
+                    "Action": "*",
+                    "Resource": "*"
+                }
+            ]
+        }' \
+        --private-dns-enabled \
+        --region "$region" \
+        --tag-specifications "ResourceType=vpc-endpoint,Tags=[{Key=Name,Value=${cluster_name}-ec2-endpoint}]" \
+        --query 'VpcEndpoint.VpcEndpointId' \
+        --output text)
+    
+    # 3. Create ELB Interface Endpoint (for load balancer operations)
+    echo "   Creating ELB Interface endpoint..."
+    local elb_endpoint_id=$(aws ec2 create-vpc-endpoint \
+        --vpc-id "$vpc_id" \
+        --service-name "com.amazonaws.${region}.elasticloadbalancing" \
+        --vpc-endpoint-type Interface \
+        --subnet-ids $(echo "$private_subnet_ids" | tr ',' ' ') \
+        --security-group-ids "$endpoints_sg_id" \
+        --policy-document '{
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": "*",
+                    "Action": "*",
+                    "Resource": "*"
+                }
+            ]
+        }' \
+        --private-dns-enabled \
+        --region "$region" \
+        --tag-specifications "ResourceType=vpc-endpoint,Tags=[{Key=Name,Value=${cluster_name}-elb-endpoint}]" \
+        --query 'VpcEndpoint.VpcEndpointId' \
+        --output text)
+    
+    # 4. Create Route53 Interface Endpoint (for DNS resolution)
+    echo "   Creating Route53 Interface endpoint..."
+    local route53_endpoint_id=$(aws ec2 create-vpc-endpoint \
+        --vpc-id "$vpc_id" \
+        --service-name "com.amazonaws.${region}.route53" \
+        --vpc-endpoint-type Interface \
+        --subnet-ids $(echo "$private_subnet_ids" | tr ',' ' ') \
+        --security-group-ids "$endpoints_sg_id" \
+        --policy-document '{
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": "*",
+                    "Action": "*",
+                    "Resource": "*"
+                }
+            ]
+        }' \
+        --private-dns-enabled \
+        --region "$region" \
+        --tag-specifications "ResourceType=vpc-endpoint,Tags=[{Key=Name,Value=${cluster_name}-route53-endpoint}]" \
+        --query 'VpcEndpoint.VpcEndpointId' \
+        --output text)
+    
+    # 5. Create STS Interface Endpoint (for temporary credentials)
+    echo "   Creating STS Interface endpoint..."
+    local sts_endpoint_id=$(aws ec2 create-vpc-endpoint \
+        --vpc-id "$vpc_id" \
+        --service-name "com.amazonaws.${region}.sts" \
+        --vpc-endpoint-type Interface \
+        --subnet-ids $(echo "$private_subnet_ids" | tr ',' ' ') \
+        --security-group-ids "$endpoints_sg_id" \
+        --policy-document '{
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": "*",
+                    "Action": "*",
+                    "Resource": "*"
+                }
+            ]
+        }' \
+        --private-dns-enabled \
+        --region "$region" \
+        --tag-specifications "ResourceType=vpc-endpoint,Tags=[{Key=Name,Value=${cluster_name}-sts-endpoint}]" \
+        --query 'VpcEndpoint.VpcEndpointId' \
+        --output text)
+    
+    # 6. Create EBS Interface Endpoint (for EBS volume operations)
+    echo "   Creating EBS Interface endpoint..."
+    local ebs_endpoint_id=$(aws ec2 create-vpc-endpoint \
+        --vpc-id "$vpc_id" \
+        --service-name "com.amazonaws.${region}.ebs" \
+        --vpc-endpoint-type Interface \
+        --subnet-ids $(echo "$private_subnet_ids" | tr ',' ' ') \
+        --security-group-ids "$endpoints_sg_id" \
+        --policy-document '{
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": "*",
+                    "Action": "*",
+                    "Resource": "*"
+                }
+            ]
+        }' \
+        --private-dns-enabled \
+        --region "$region" \
+        --tag-specifications "ResourceType=vpc-endpoint,Tags=[{Key=Name,Value=${cluster_name}-ebs-endpoint}]" \
+        --query 'VpcEndpoint.VpcEndpointId' \
+        --output text)
+    
+    # Save VPC endpoint information
+    echo "$s3_endpoint_id" > "$output_dir/s3-endpoint-id"
+    echo "$ec2_endpoint_id" > "$output_dir/ec2-endpoint-id"
+    echo "$elb_endpoint_id" > "$output_dir/elb-endpoint-id"
+    echo "$route53_endpoint_id" > "$output_dir/route53-endpoint-id"
+    echo "$sts_endpoint_id" > "$output_dir/sts-endpoint-id"
+    echo "$ebs_endpoint_id" > "$output_dir/ebs-endpoint-id"
+    echo "$endpoints_sg_id" > "$output_dir/vpc-endpoints-security-group-id"
+    
+    echo "✅ VPC endpoints created successfully"
+    echo "   S3 Gateway Endpoint: $s3_endpoint_id"
+    echo "   EC2 Interface Endpoint: $ec2_endpoint_id"
+    echo "   ELB Interface Endpoint: $elb_endpoint_id"
+    echo "   Route53 Interface Endpoint: $route53_endpoint_id"
+    echo "   STS Interface Endpoint: $sts_endpoint_id"
+    echo "   EBS Interface Endpoint: $ebs_endpoint_id"
+    echo "   VPC Endpoints Security Group: $endpoints_sg_id"
+}
+
 # Function to create bastion host
 create_bastion_host() {
     local cluster_name="$1"
@@ -800,6 +1011,12 @@ main() {
     # Create VPC infrastructure
     create_vpc_infrastructure "$CLUSTER_NAME" "$REGION" "$VPC_CIDR" "$PRIVATE_SUBNETS" "$PUBLIC_SUBNETS" "$OUTPUT_DIR"
     
+    # Create VPC endpoints for disconnected cluster
+    local vpc_id=$(cat "$OUTPUT_DIR/vpc-id")
+    local private_subnet_ids=$(cat "$OUTPUT_DIR/private-subnet-ids")
+    local public_subnet_ids=$(cat "$OUTPUT_DIR/public-subnet-ids")
+    create_vpc_endpoints "$CLUSTER_NAME" "$REGION" "$vpc_id" "$private_subnet_ids" "$public_subnet_ids" "$OUTPUT_DIR"
+    
     # Note: Bastion host and cluster security group creation moved to separate script
     # Run ./02-create-bastion.sh to create bastion host and security groups
     
@@ -817,6 +1034,15 @@ main() {
     echo "   region: AWS region"
     echo "   vpc-cidr: VPC CIDR block"
     echo ""
+    echo "🔗 VPC Endpoints created:"
+    echo "   s3-endpoint-id: S3 Gateway endpoint for object storage"
+    echo "   ec2-endpoint-id: EC2 Interface endpoint for compute API"
+    echo "   elb-endpoint-id: ELB Interface endpoint for load balancer API"
+    echo "   route53-endpoint-id: Route53 Interface endpoint for DNS"
+    echo "   sts-endpoint-id: STS Interface endpoint for temporary credentials"
+    echo "   ebs-endpoint-id: EBS Interface endpoint for block storage"
+    echo "   vpc-endpoints-security-group-id: Security group for VPC endpoints"
+    echo ""
     echo "🔗 Next steps:"
     echo "1. Create bastion host: ./02-create-bastion.sh --cluster-name $CLUSTER_NAME"
     if [[ "$SNO_MODE" == "yes" ]]; then
@@ -828,12 +1054,14 @@ main() {
         echo "🎯 SNO-specific notes:"
         echo "   - Single private subnet created for SNO node"
         echo "   - Use --sno flag in subsequent scripts for consistency"
-        echo "   - Estimated cost: $20-40/day (vs $50-100/day for multi-node)"
+        echo "   - Estimated cost: $30-50/day (including VPC endpoints)"
     fi
     echo ""
     echo "⚠️  Important:"
     echo "   - Private subnets are completely isolated from internet (disconnected cluster)"
     echo "   - No NAT Gateway created for cost optimization"
+    echo "   - VPC endpoints provide secure access to AWS services without internet"
+    echo "   - Bootstrap and worker nodes can now access required AWS services"
 }
 
 # Run main function with all arguments
