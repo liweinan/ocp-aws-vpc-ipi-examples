@@ -211,13 +211,46 @@ $(echo "$registry_cert" | sed 's/^/  /')
 imageContentSources:
 - mirrors:
   - localhost:$registry_port/openshift/ocp/release
-  source: registry.ci.openshift.org/ocp/4.19.2
+  source: registry.ci.openshift.org/ocp/4.19.2/release
 - mirrors:
   - localhost:$registry_port/openshift/ocp/release
-  source: registry.ci.openshift.org/ocp/4.19
+  source: registry.ci.openshift.org/ocp/4.19/release
 - mirrors:
   - localhost:$registry_port/openshift/ocp/release
   source: registry.ci.openshift.org/origin/release
+- mirrors:
+  - localhost:$registry_port/openshift/installer
+  source: registry.ci.openshift.org/ocp/4.19.2/installer
+- mirrors:
+  - localhost:$registry_port/openshift/cli
+  source: registry.ci.openshift.org/ocp/4.19.2/cli
+- mirrors:
+  - localhost:$registry_port/openshift/machine-config-operator
+  source: registry.ci.openshift.org/ocp/4.19.2/machine-config-operator
+- mirrors:
+  - localhost:$registry_port/openshift/cluster-version-operator
+  source: registry.ci.openshift.org/ocp/4.19.2/cluster-version-operator
+- mirrors:
+  - localhost:$registry_port/openshift/etcd
+  source: registry.ci.openshift.org/ocp/4.19.2/etcd
+- mirrors:
+  - localhost:$registry_port/openshift/hyperkube
+  source: registry.ci.openshift.org/ocp/4.19.2/hyperkube
+- mirrors:
+  - localhost:$registry_port/openshift/oauth-server
+  source: registry.ci.openshift.org/ocp/4.19.2/oauth-server
+- mirrors:
+  - localhost:$registry_port/openshift/oauth-proxy
+  source: registry.ci.openshift.org/ocp/4.19.2/oauth-proxy
+- mirrors:
+  - localhost:$registry_port/openshift/console
+  source: registry.ci.openshift.org/ocp/4.19.2/console
+- mirrors:
+  - localhost:$registry_port/openshift/haproxy-router
+  source: registry.ci.openshift.org/ocp/4.19.2/haproxy-router
+- mirrors:
+  - localhost:$registry_port/openshift/coredns
+  source: registry.ci.openshift.org/ocp/4.19.2/coredns
 - mirrors:
   - localhost:$registry_port/openshift
   source: registry.ci.openshift.org/openshift
@@ -225,10 +258,10 @@ imageContentSources:
   - localhost:$registry_port/openshift
   source: registry.ci.openshift.org/origin
 - mirrors:
-  - localhost:$registry_port/openshift
+  - localhost:$registry_port/openshift/ocp/release
   source: quay.io/openshift-release-dev/ocp-release
 - mirrors:
-  - localhost:$registry_port/openshift
+  - localhost:$registry_port/openshift/ocp/release
   source: quay.io/openshift-release-dev/ocp-v4.0-art-dev
 EOF
     
