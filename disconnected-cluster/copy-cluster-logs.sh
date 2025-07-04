@@ -109,6 +109,38 @@ copy_directory() {
     fi
 }
 
+# 函数：拷贝bootstrap失败日志包
+copy_log_bundles() {
+    print_info "检查bootstrap失败日志包..."
+    
+    # 查找log bundle文件
+    local log_bundles
+    log_bundles=$(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$BASTION_USER@$BASTION_HOST" "find $REMOTE_DIR -name 'log-bundle-*.tar.gz' 2>/dev/null" || true)
+    
+    if [[ -z "$log_bundles" ]]; then
+        print_info "未找到bootstrap失败日志包（可能安装正常进行中）"
+        return 0
+    fi
+    
+    # 拷贝找到的所有log bundle文件
+    if [[ -n "$log_bundles" ]]; then
+        while IFS= read -r bundle_path; do
+            if [[ -n "$bundle_path" ]]; then
+                local bundle_filename=$(basename "$bundle_path")
+                print_info "拷贝bootstrap失败日志 ($bundle_filename)..."
+                
+                if scp -i "$SSH_KEY" -o StrictHostKeyChecking=no "$BASTION_USER@$BASTION_HOST:$bundle_path" "$LOCAL_DIR/" 2>/dev/null; then
+                    local filesize=$(ls -lh "$LOCAL_DIR/$bundle_filename" 2>/dev/null | awk '{print $5}' || echo "未知大小")
+                    print_success "✓ Bootstrap失败日志拷贝成功 ($filesize)"
+                    print_warning "⚠️  检测到bootstrap失败，建议查看日志包进行故障排除"
+                else
+                    print_warning "✗ Bootstrap失败日志拷贝失败"
+                fi
+            fi
+        done <<< "$log_bundles"
+    fi
+}
+
 # 函数：生成拷贝报告
 generate_report() {
     local report_file="$LOCAL_DIR/copy-report-${TIMESTAMP}.txt"
@@ -154,12 +186,25 @@ generate_report() {
             echo "✓ auth/ - $(find "$LOCAL_DIR/auth" -type f | wc -l) 个文件"
         fi
         
-        if [[ -d "$LOCAL_DIR/cluster-api" ]]; then
-            echo "✓ cluster-api/ - $(find "$LOCAL_DIR/cluster-api" -type f | wc -l) 个文件"
+        if [[ -d "$LOCAL_DIR/.clusterapi_output" ]]; then
+            echo "✓ .clusterapi_output/ - $(find "$LOCAL_DIR/.clusterapi_output" -type f | wc -l) 个文件"
         fi
         
         if [[ -d "$LOCAL_DIR/tls" ]]; then
             echo "✓ tls/ - $(find "$LOCAL_DIR/tls" -type f | wc -l) 个文件"
+        fi
+        
+        # 检查log bundle文件
+        local log_bundles=$(find "$LOCAL_DIR" -name "log-bundle-*.tar.gz" 2>/dev/null)
+        if [[ -n "$log_bundles" ]]; then
+            echo ""
+            echo "Bootstrap失败日志包:"
+            echo "-------------------"
+            while IFS= read -r bundle; do
+                if [[ -f "$bundle" ]]; then
+                    echo "⚠️  $(basename "$bundle") - $(ls -lh "$bundle" | awk '{print $5}')"
+                fi
+            done <<< "$log_bundles"
         fi
         
         echo ""
@@ -242,8 +287,11 @@ main() {
     # 拷贝目录
     print_info "拷贝重要目录..."
     copy_directory "auth" "认证文件"
-    copy_directory "cluster-api" "集群API文件"
+    copy_directory ".clusterapi_output" "集群API文件"
     copy_directory "tls" "TLS证书"
+    
+    # 拷贝bootstrap失败日志包
+    copy_log_bundles
     
     # 生成报告
     generate_report
@@ -262,6 +310,20 @@ main() {
     echo "  查看最新日志: tail -f $LOCAL_DIR/.openshift_install.log"
     echo "  查看集群状态: cat $LOCAL_DIR/metadata.json | jq ."
     echo "  查看拷贝报告: cat $LOCAL_DIR/copy-report-${TIMESTAMP}.txt"
+    
+    # 检查是否有bootstrap失败日志包
+    local log_bundles=$(find "$LOCAL_DIR" -name "log-bundle-*.tar.gz" 2>/dev/null)
+    if [[ -n "$log_bundles" ]]; then
+        echo ""
+        print_warning "检测到bootstrap失败日志包，故障排除命令："
+        while IFS= read -r bundle; do
+            if [[ -f "$bundle" ]]; then
+                local bundle_name=$(basename "$bundle")
+                echo "  解压日志包: tar -xzf $LOCAL_DIR/$bundle_name -C $LOCAL_DIR/"
+                echo "  查看bootstrap日志: grep -i error $LOCAL_DIR/bootstrap-*"
+            fi
+        done <<< "$log_bundles"
+    fi
     
     print_success "日志拷贝脚本执行完成!"
 }
