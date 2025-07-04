@@ -89,6 +89,8 @@ backup.sh
 
 # Backup directories
 backups/
+script-backup/
+*-backup/
 
 # Ignore log, report, and output files
 *.log

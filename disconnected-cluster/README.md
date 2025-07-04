@@ -17,9 +17,9 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 1. **创建基础设施** - 创建VPC、子网、安全组等
 2. **创建Bastion主机** - 部署跳板机用于后续操作
 3. **复制凭证** - 将AWS凭证、SSH密钥和pull secret复制到bastion host
-4. **搭建镜像仓库** - 在bastion host上部署私有镜像仓库
-5. **同步镜像** - 从外部环境同步OpenShift镜像到私有仓库
-6. **复制基础设施信息和工具** - 将必要的文件复制到bastion host
+4. **复制基础设施信息和工具** - 将必要的文件复制到bastion host，安装所有依赖工具
+5. **搭建镜像仓库** - 在bastion host上部署私有镜像仓库
+6. **同步镜像** - 从外部环境同步OpenShift镜像到私有仓库
 7. **准备安装配置** - 准备disconnected cluster的安装配置
 8. **安装集群** - 使用私有镜像仓库安装OpenShift集群
 9. **验证集群** - 验证集群功能并配置后续使用
@@ -32,9 +32,9 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 | `01-create-infrastructure.sh` | 创建基础设施 | 创建VPC、子网、安全组等基础资源，支持SNO模式 |
 | `02-create-bastion.sh` | 创建Bastion主机 | 部署跳板机，配置必要的工具和环境 |
 | `03-copy-credentials.sh` | 复制凭证 | 将AWS凭证、SSH密钥和pull secret复制到bastion host |
-| `04-setup-mirror-registry.sh` | 搭建镜像仓库 | 在bastion host上部署私有镜像仓库 |
-| `05-sync-images.sh` | 同步镜像 | 从外部同步OpenShift镜像到私有仓库 |
-| `06-copy-infra-and-tools.sh` | 复制基础设施信息 | 将基础设施信息和工具复制到bastion host |
+| `04-copy-infra-and-tools.sh` | 复制基础设施信息和工具 | 将基础设施信息和工具复制到bastion host，安装所有依赖 |
+| `05-setup-mirror-registry.sh` | 搭建镜像仓库 | 在bastion host上部署私有镜像仓库 |
+| `06-sync-images.sh` | 同步镜像 | 从外部同步OpenShift镜像到私有仓库 |
 | `07-prepare-install-config.sh` | 准备安装配置 | 生成disconnected cluster的安装配置 |
 | `08-install-cluster.sh` | 安装集群 | 创建manifests、修改配置、安装OpenShift集群 |
 | `09-verify-cluster.sh` | 验证集群 | 验证集群功能和镜像仓库配置 |
@@ -85,14 +85,14 @@ Disconnected cluster（断网集群）是一个完全隔离的OpenShift环境，
 # 3. 复制凭证到bastion host
 ./03-copy-credentials.sh --cluster-name my-disconnected-cluster
 
-# 4. 搭建镜像仓库
-./04-setup-mirror-registry.sh --cluster-name my-disconnected-cluster
+# 4. 复制基础设施信息和工具
+./04-copy-infra-and-tools.sh
 
-# 5. 同步镜像（需要网络连接）
-./05-sync-images.sh --cluster-name my-disconnected-cluster --openshift-version 4.18.15
+# 5. 搭建镜像仓库
+./05-setup-mirror-registry.sh --cluster-name my-disconnected-cluster
 
-# 6. 复制基础设施信息和工具
-./06-copy-infra-and-tools.sh --cluster-name my-disconnected-cluster
+# 6. 同步镜像（需要网络连接）
+./06-sync-images.sh --cluster-name my-disconnected-cluster --openshift-version 4.18.15
 
 # 7. 准备安装配置
 ./07-prepare-install-config.sh --cluster-name my-disconnected-cluster --base-domain example.com
