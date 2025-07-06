@@ -129,6 +129,55 @@ Resources:
       SubnetId: !Ref PrivateSubnet
       RouteTableId: !Ref PrivateRouteTable
 
+  # Route from private subnet to bastion host (for registry access)
+  PrivateToBastionRoute:
+    Type: AWS::EC2::Route
+    DependsOn: BastionInstance
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: !Ref PublicSubnetCidr
+      InstanceId: !Ref BastionInstance
+      Description: 'Route from private subnet to bastion host for registry access'
+
+  # Bastion Instance (for registry access)
+  BastionInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref BastionAMI
+      InstanceType: t3.medium
+      KeyName: !Ref BastionKeyName
+      SecurityGroupIds:
+        - !Ref BastionSecurityGroup
+      SubnetId: !Ref PublicSubnet
+      SourceDestCheck: false  # Enable IP forwarding
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-bastion'
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Enable IP forwarding for routing
+          echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+          sysctl -p
+          
+          # Configure iptables for NAT
+          iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+          iptables-save > /etc/iptables/rules.v4
+          
+          # Install iptables-persistent
+          apt-get update
+          apt-get install -y iptables-persistent
+
+  # Bastion AMI (Ubuntu 22.04)
+  BastionAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+
+  # Bastion Key Name (will be created by the script)
+  BastionKeyName:
+    Type: String
+    Default: 'bastion-key'
+
   # Security Group for VPC Endpoints
   VPCEndpointsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -243,8 +292,6 @@ Resources:
             Principal: '*'
             Action: '*'
             Resource: '*'
-
-
 
   # Bastion Security Group
   BastionSecurityGroup:

@@ -132,3 +132,7 @@ logs/*.log
 logs/metadata-*.json
 logs/terraform-*.json
 logs/install-config-*.yaml
+
+# Ignore log bundle files and directories
+log-bundle-*/
+log-bundle-*.tar.gz
