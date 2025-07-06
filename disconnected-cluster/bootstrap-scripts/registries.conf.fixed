@@ -1,0 +1,161 @@
+[[registry]]
+location = "registry.ci.openshift.org/ocp/4.19.2/release"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/ocp/release"
+insecure = true
+
+[[registry]]
+location = "registry.ci.openshift.org/ocp/4.19/release"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/ocp/release"
+insecure = true
+
+[[registry]]
+location = "registry.ci.openshift.org/origin/release"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/ocp/release"
+insecure = true
+
+[[registry]]
+location = "registry.ci.openshift.org/ocp/4.19.2/installer"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/installer"
+insecure = true
+
+[[registry]]
+location = "registry.ci.openshift.org/ocp/4.19.2/cli"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/cli"
+insecure = true
+
+[[registry]]
+location = "registry.ci.openshift.org/ocp/4.19.2/machine-config-operator"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/machine-config-operator"
+insecure = true
+
+[[registry]]
+location = "registry.ci.openshift.org/ocp/4.19.2/cluster-version-operator"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/cluster-version-operator"
+insecure = true
+
+[[registry]]
+location = "registry.ci.openshift.org/ocp/4.19.2/etcd"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/etcd"
+insecure = true
+
+[[registry]]
+location = "registry.ci.openshift.org/ocp/4.19.2/hyperkube"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/hyperkube"
+insecure = true
+
+[[registry]]
+location = "registry.ci.openshift.org/ocp/4.19.2/oauth-server"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/oauth-server"
+insecure = true
+
+[[registry]]
+location = "registry.ci.openshift.org/ocp/4.19.2/oauth-proxy"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/oauth-proxy"
+insecure = true
+
+[[registry]]
+location = "registry.ci.openshift.org/ocp/4.19.2/console"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/console"
+insecure = true
+
+[[registry]]
+location = "registry.ci.openshift.org/ocp/4.19.2/haproxy-router"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/haproxy-router"
+insecure = true
+
+[[registry]]
+location = "registry.ci.openshift.org/ocp/4.19.2/coredns"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/coredns"
+insecure = true
+
+[[registry]]
+location = "registry.ci.openshift.org/openshift"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift"
+insecure = true
+
+[[registry]]
+location = "registry.ci.openshift.org/origin"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift"
+insecure = true
+
+[[registry]]
+location = "quay.io/openshift-release-dev/ocp-release"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/ocp/release"
+insecure = true
+
+[[registry]]
+location = "quay.io/openshift-release-dev/ocp-v4.0-art-dev"
+insecure = false
+mirror-by-digest-only = true
+
+[[registry.mirror]]
+location = "localhost:5000/openshift/ocp/release"
+insecure = true

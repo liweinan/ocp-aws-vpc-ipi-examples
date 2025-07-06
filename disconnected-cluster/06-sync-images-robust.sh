@@ -59,6 +59,19 @@ core_images=(
     "coredns"
 )
 
+# Define bootstrap-specific images (critical for bootstrap process)
+bootstrap_images=(
+    "cluster-config-api"
+    "cluster-authentication-operator"
+    "cluster-config-operator"
+    "cluster-etcd-operator"
+    "cluster-kube-apiserver-operator"
+    "cluster-kube-controller-manager-operator"
+    "cluster-kube-scheduler-operator"
+    "cluster-node-tuning-operator"
+    "cloud-credential-operator"
+)
+
 # Define release images (critical for bootstrap)
 release_images=(
     "ocp/release:4.19.2"
@@ -80,7 +93,13 @@ additional_images=(
     "kube-state-metrics"
 )
 
-total_images=$((${#core_images[@]} + ${#release_images[@]} + ${#additional_images[@]}))
+# Define tool images (for oc, installer, kubectl binaries)
+tool_images=(
+    "cli:latest"
+    "installer:latest"
+)
+
+total_images=$((${#core_images[@]} + ${#release_images[@]} + ${#additional_images[@]} + ${#tool_images[@]} + ${#bootstrap_images[@]}))
 synced_count=0
 failed_count=0
 skipped_count=0
@@ -124,6 +143,37 @@ for img in "${release_images[@]}"; do
 done
 
 echo ""
+echo -e "${BLUE}📦 Syncing tool images (${#tool_images[@]} images)...${NC}"
+
+# Sync tool images (for oc, installer binaries)
+for img in "${tool_images[@]}"; do
+    current_count=$((current_count + 1))
+    echo ""
+    echo -e "${BLUE}[${current_count}/${total_images}] Processing tool image: ${img}${NC}"
+    
+    # Parse image name and tag
+    img_name=$(echo "$img" | cut -d':' -f1)
+    img_tag=$(echo "$img" | cut -d':' -f2)
+    
+    # Check if image already exists
+    if curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/openshift/${img_name}/tags/list" 2>/dev/null | grep -q "${img_tag}"; then
+        echo -e "${YELLOW}   ⏭️  Already exists in registry, skipping${NC}"
+        skipped_count=$((skipped_count + 1))
+    else
+        # Call single sync script
+        if sudo -E "$SINGLE_SYNC_SCRIPT" "$img_name" "$img_tag" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"; then
+            synced_count=$((synced_count + 1))
+        else
+            echo -e "${RED}   ❌ Failed to sync ${img}${NC}"
+            failed_count=$((failed_count + 1))
+        fi
+    fi
+    
+    # Brief pause between images
+    sleep 2
+done
+
+echo ""
 echo -e "${BLUE}📦 Syncing core images (${#core_images[@]} images)...${NC}"
 
 for img in "${core_images[@]}"; do
@@ -133,6 +183,33 @@ for img in "${core_images[@]}"; do
     
     # Check if image already exists before attempting sync
     if curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/openshift/${img}/tags/list" 2>/dev/null | grep -q "${OPENSHIFT_VERSION}"; then
+        echo -e "${YELLOW}   ⏭️  Already exists in registry, skipping${NC}"
+        skipped_count=$((skipped_count + 1))
+    else
+        # Call single sync script (script handles sudo internally)
+        if sudo -E "$SINGLE_SYNC_SCRIPT" "$img" "$OPENSHIFT_VERSION" "$REGISTRY_PORT" "$REGISTRY_USER" "$REGISTRY_PASSWORD"; then
+            synced_count=$((synced_count + 1))
+        else
+            echo -e "${RED}   ❌ Failed to sync ${img}${NC}"
+            failed_count=$((failed_count + 1))
+        fi
+    fi
+    
+    # Brief pause between images
+    sleep 2
+done
+
+echo ""
+echo -e "${BLUE}📦 Syncing bootstrap images (${#bootstrap_images[@]} images)...${NC}"
+
+for img in "${bootstrap_images[@]}"; do
+    current_count=$((current_count + 1))
+    echo ""
+    echo -e "${BLUE}[${current_count}/${total_images}] Processing bootstrap image: ${img}${NC}"
+    
+    # Check if image already exists before attempting sync
+    check_tag="latest"
+    if curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/openshift/${img}/tags/list" 2>/dev/null | grep -q "${check_tag}"; then
         echo -e "${YELLOW}   ⏭️  Already exists in registry, skipping${NC}"
         skipped_count=$((skipped_count + 1))
     else
@@ -185,7 +262,7 @@ echo "   Total processed: ${current_count}/${total_images} images"
 # Verify all expected images are in registry
 echo ""
 echo -e "${BLUE}🔍 Verifying registry contents...${NC}"
-all_expected_images=("${core_images[@]}" "${additional_images[@]}")
+all_expected_images=("${core_images[@]}" "${additional_images[@]}" "${bootstrap_images[@]}")
 registry_catalog=$(curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/_catalog" 2>/dev/null || echo '{"repositories":[]}')
 missing_images=()
 verified_count=0
@@ -263,6 +340,9 @@ $(printf "  - %s\n" "${release_images[@]}")
 Core Images (${#core_images[@]}):
 $(printf "  - %s\n" "${core_images[@]}")
 
+Bootstrap Images (${#bootstrap_images[@]}):
+$(printf "  - %s\n" "${bootstrap_images[@]}")
+
 Additional Images (${#additional_images[@]}):
 $(printf "  - %s\n" "${additional_images[@]}")
 
@@ -279,8 +359,14 @@ metadata:
 spec:
   repositoryDigestMirrors:
   - mirrors:
-    - localhost:${REGISTRY_PORT}/openshift
-    source: registry.ci.openshift.org/ocp/${OPENSHIFT_VERSION}
+    - localhost:${REGISTRY_PORT}/openshift/ocp/release
+    source: registry.ci.openshift.org/ocp/4.19.2
+  - mirrors:
+    - localhost:${REGISTRY_PORT}/openshift/ocp/release
+    source: registry.ci.openshift.org/ocp/4.19
+  - mirrors:
+    - localhost:${REGISTRY_PORT}/openshift/ocp/release
+    source: registry.ci.openshift.org/origin/release
   - mirrors:
     - localhost:${REGISTRY_PORT}/openshift
     source: registry.ci.openshift.org/openshift
@@ -299,6 +385,97 @@ echo ""
 echo -e "${BLUE}📄 Summary saved to: ${sync_dir}/sync-summary.txt${NC}"
 echo -e "${BLUE}📄 ImageContentSources saved to: ${sync_dir}/imageContentSources.yaml${NC}"
 
+# Fix missing image tags for bootstrap compatibility
+echo ""
+echo -e "${BLUE}🔧 Fixing missing image tags for bootstrap compatibility...${NC}"
+
+# Check if 4.19 tag exists for ocp/release
+if curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/openshift/ocp/release/tags/list" | grep -q '"4.19"'; then
+    echo -e "${GREEN}✅ Tag 4.19 already exists for ocp/release${NC}"
+else
+    echo -e "${YELLOW}⚠️  Tag 4.19 missing for ocp/release, creating from 4.19.0...${NC}"
+    
+    # Pull the 4.19.0 image
+    echo -e "${BLUE}📥 Pulling 4.19.0 image...${NC}"
+    if sudo podman pull "localhost:${REGISTRY_PORT}/openshift/ocp/release:4.19.0" --tls-verify=false; then
+        # Tag it as 4.19
+        echo -e "${BLUE}🏷️  Creating 4.19 tag...${NC}"
+        sudo podman tag "localhost:${REGISTRY_PORT}/openshift/ocp/release:4.19.0" "localhost:${REGISTRY_PORT}/openshift/ocp/release:4.19"
+        
+        # Push the new tag
+        echo -e "${BLUE}📤 Pushing 4.19 tag...${NC}"
+        if sudo podman push "localhost:${REGISTRY_PORT}/openshift/ocp/release:4.19" --tls-verify=false; then
+            echo -e "${GREEN}✅ Tag 4.19 created successfully${NC}"
+        else
+            echo -e "${RED}❌ Failed to push 4.19 tag${NC}"
+        fi
+    else
+        echo -e "${RED}❌ Failed to pull 4.19.0 image${NC}"
+    fi
+fi
+
+echo -e "${BLUE}📋 Final ocp/release tags:${NC}"
+curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/openshift/ocp/release/tags/list" 2>/dev/null | jq '.' || echo "Unable to fetch tags"
+
+# Function to extract and install binaries from synced images
+extract_and_install_binaries() {
+    local registry_url="localhost:${REGISTRY_PORT}"
+    local registry_user="$REGISTRY_USER"
+    local registry_password="$REGISTRY_PASSWORD"
+    
+    echo ""
+    echo -e "${BLUE}🔧 Extracting and installing binaries from synced images...${NC}"
+    
+    # Extract oc binary from cli image
+    echo -e "${BLUE}📥 Extracting oc binary from cli image...${NC}"
+    if curl -k -s -u "${registry_user}:${registry_password}" "https://${registry_url}/v2/openshift/cli/tags/list" | grep -q "4.19.2"; then
+        echo -e "${BLUE}   Pulling cli:4.19.2 image...${NC}"
+        if sudo podman pull "${registry_url}/openshift/cli:4.19.2" --tls-verify=false; then
+            echo -e "${BLUE}   Creating temporary container...${NC}"
+            sudo podman create --name temp-cli "${registry_url}/openshift/cli:4.19.2"
+            echo -e "${BLUE}   Extracting oc binary...${NC}"
+            sudo podman cp temp-cli:/usr/bin/oc /tmp/oc
+            sudo podman rm temp-cli
+            sudo mv /tmp/oc /usr/local/bin/oc
+            sudo chmod +x /usr/local/bin/oc
+            echo -e "${GREEN}   ✅ oc binary installed successfully${NC}"
+            /usr/local/bin/oc version --client
+        else
+            echo -e "${RED}   ❌ Failed to pull cli image${NC}"
+        fi
+    else
+        echo -e "${YELLOW}   ⚠️  cli:4.19.2 not found in registry${NC}"
+    fi
+    
+    # Extract installer binary from installer image
+    echo -e "${BLUE}📥 Extracting installer binary from installer image...${NC}"
+    if curl -k -s -u "${registry_user}:${registry_password}" "https://${registry_url}/v2/openshift/installer/tags/list" | grep -q "4.19.2"; then
+        echo -e "${BLUE}   Pulling installer:4.19.2 image...${NC}"
+        if sudo podman pull "${registry_url}/openshift/installer:4.19.2" --tls-verify=false; then
+            echo -e "${BLUE}   Creating temporary container...${NC}"
+            sudo podman create --name temp-installer "${registry_url}/openshift/installer:4.19.2"
+            echo -e "${BLUE}   Extracting installer binary...${NC}"
+            sudo podman cp temp-installer:/usr/bin/openshift-install /tmp/openshift-install
+            sudo podman rm temp-installer
+            sudo mv /tmp/openshift-install /usr/local/bin/openshift-install
+            sudo chmod +x /usr/local/bin/openshift-install
+            echo -e "${GREEN}   ✅ openshift-install binary installed successfully${NC}"
+            /usr/local/bin/openshift-install version
+        else
+            echo -e "${RED}   ❌ Failed to pull installer image${NC}"
+        fi
+    else
+        echo -e "${YELLOW}   ⚠️  installer:4.19.2 not found in registry${NC}"
+    fi
+    
+    # Clean up images to save space
+    echo -e "${BLUE}🧹 Cleaning up temporary images...${NC}"
+    sudo podman rmi "${registry_url}/openshift/cli:4.19.2" 2>/dev/null || true
+    sudo podman rmi "${registry_url}/openshift/installer:4.19.2" 2>/dev/null || true
+    
+    echo -e "${GREEN}✅ Binary extraction and installation completed${NC}"
+}
+
 # Return success if most images are available in registry (either synced or already existed)
 available_images=$((synced_count + skipped_count))
 if [[ $verified_count -ge $((total_images * 90 / 100)) && $available_images -ge $((total_images * 90 / 100)) ]]; then
@@ -315,6 +492,7 @@ if [[ $verified_count -ge $((total_images * 90 / 100)) && $available_images -ge 
     echo "   1. Run ./07-prepare-install-config.sh to prepare installation"
     echo "   2. Run ./08-install-cluster.sh to install the cluster"
     echo "   3. Verify with: curl -k -u admin:admin123 'https://localhost:5000/v2/_catalog'"
+    extract_and_install_binaries
     exit 0
 else
     echo ""
