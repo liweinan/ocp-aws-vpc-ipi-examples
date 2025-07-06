@@ -874,9 +874,9 @@ else
 fi
 
 # Extract installer binary from installer image
-if podman image exists "\$REGISTRY_URL/openshift/installer:4.19.2"; then
+if podman image exists "$REGISTRY_URL/openshift/installer:4.19.2"; then
     echo "Extracting installer binary..."
-    podman create --name temp-installer "\$REGISTRY_URL/openshift/installer:4.19.2"
+    podman create --name temp-installer "$REGISTRY_URL/openshift/installer:4.19.2"
     podman cp temp-installer:/usr/bin/openshift-install /tmp/openshift-install
     podman rm temp-installer
     mv /tmp/openshift-install /usr/local/bin/openshift-install
@@ -887,14 +887,40 @@ else
     echo "installer:4.19.2 image not found, trying alternative tags..."
     # Try alternative tags
     for tag in "4.19.0" "latest"; do
-        if podman image exists "\$REGISTRY_URL/openshift/installer:\$tag"; then
-            echo "Extracting installer binary from installer:\$tag..."
-            podman create --name temp-installer "\$REGISTRY_URL/openshift/installer:\$tag"
+        if podman image exists "$REGISTRY_URL/openshift/installer:$tag"; then
+            echo "Extracting installer binary from installer:$tag..."
+            podman create --name temp-installer "$REGISTRY_URL/openshift/installer:$tag"
             podman cp temp-installer:/usr/bin/openshift-install /tmp/openshift-install
             podman rm temp-installer
             mv /tmp/openshift-install /usr/local/bin/openshift-install
             chmod +x /usr/local/bin/openshift-install
-            echo "openshift-install binary installed successfully from tag \$tag"
+            echo "openshift-install binary installed successfully from tag $tag"
+            break
+        fi
+    done
+fi
+
+# Extract kubelet binary from hyperkube image
+if podman image exists "$REGISTRY_URL/openshift/hyperkube:4.19.2"; then
+    echo "Extracting kubelet binary..."
+    podman create --name temp-hyperkube "$REGISTRY_URL/openshift/hyperkube:4.19.2"
+    podman cp temp-hyperkube:/usr/bin/kubelet /tmp/kubelet
+    podman rm temp-hyperkube
+    mv /tmp/kubelet /usr/local/bin/kubelet
+    chmod +x /usr/local/bin/kubelet
+    echo "kubelet binary installed successfully"
+    /usr/local/bin/kubelet --version || true
+else
+    echo "hyperkube:4.19.2 image not found, trying alternative tags..."
+    for tag in "4.19.0" "latest"; do
+        if podman image exists "$REGISTRY_URL/openshift/hyperkube:$tag"; then
+            echo "Extracting kubelet binary from hyperkube:$tag..."
+            podman create --name temp-hyperkube "$REGISTRY_URL/openshift/hyperkube:$tag"
+            podman cp temp-hyperkube:/usr/bin/kubelet /tmp/kubelet
+            podman rm temp-hyperkube
+            mv /tmp/kubelet /usr/local/bin/kubelet
+            chmod +x /usr/local/bin/kubelet
+            echo "kubelet binary installed successfully from tag $tag"
             break
         fi
     done

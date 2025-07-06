@@ -95,11 +95,7 @@ additional_images=(
 
 # Define tool images (for oc, installer, kubectl binaries)
 tool_images=(
-    "cli:4.19.2"
-    "cli:4.19.0"
     "cli:latest"
-    "installer:4.19.2"
-    "installer:4.19.0"
     "installer:latest"
 )
 
@@ -212,7 +208,8 @@ for img in "${bootstrap_images[@]}"; do
     echo -e "${BLUE}[${current_count}/${total_images}] Processing bootstrap image: ${img}${NC}"
     
     # Check if image already exists before attempting sync
-    if curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/openshift/${img}/tags/list" 2>/dev/null | grep -q "${OPENSHIFT_VERSION}"; then
+    check_tag="latest"
+    if curl -k -s -u "${REGISTRY_USER}:${REGISTRY_PASSWORD}" "https://localhost:${REGISTRY_PORT}/v2/openshift/${img}/tags/list" 2>/dev/null | grep -q "${check_tag}"; then
         echo -e "${YELLOW}   ⏭️  Already exists in registry, skipping${NC}"
         skipped_count=$((skipped_count + 1))
     else
